@@ -6,10 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-11-20
+## [1.0.0] - 2026-11-20
 
-First release under this name. Earlier iterations existed under a different
-name and were never published.
+First public release. `deskmark/v1` and the CLI surface are frozen at this
+version; anything that changes them gets a major bump.
 
 ### Added
 - `deskmark save` / `deskmark resume`: capture the state of work in flight
@@ -81,4 +81,4 @@ name and were never published.
   `packaging/aur/`, and a tag-triggered `release.yml` that refuses to publish
   when the tag and the package version disagree.
 
-[0.3.0]: https://github.com/<your-username>/deskmark/releases/tag/v0.3.0
+[1.0.0]: https://github.com/<your-username>/deskmark/releases/tag/v1.0.0

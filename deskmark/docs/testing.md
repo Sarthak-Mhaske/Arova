@@ -83,5 +83,5 @@ deskmark resume --yes                           # now open it
 deskmark hooks --dry-run && deskmark hooks      # then open a new shell
 ```
 
-Restore fidelity is measured here, not in CI. The v0.4 milestone (see the
+Restore fidelity is measured here, not in CI. The 1.1 milestone (see the
 README roadmap) exists because this step is done by hand at the moment.

@@ -9,7 +9,7 @@
 [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#platform-support)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-6E56CF)](docs/spec.md)
 [![Pixels](https://img.shields.io/badge/pixels%20captured-0-success)](#privacy)
-[![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)](../../releases)
+[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](../../releases)
 
 One command records where your work is — repo, branch, dirty files, open files,
 shells, agents, tabs, and the one line that says why. One command puts it back.
@@ -129,11 +129,12 @@ transcripts above are the scenes.
 ---
 
 > **⚠️ Status Notice**
-> This is pre-1.0. Linux is the measured platform for restore fidelity; macOS is
-> close behind and Windows is best-effort. See [Platform support](#platform-support).
+> 1.0.0 freezes the `deskmark/v1` format and the command line surface. Linux is
+> the measured platform for restore fidelity; macOS and Windows are best-effort.
+> See [Platform support](#platform-support).
 >
-> **Not on PyPI yet.** Until v0.4, install from a clone with `pipx install .`.
-> Do not `pip install deskmark` — nothing is published under that name.
+> **First public release.** `pipx install deskmark` if PyPI has it; otherwise
+> `pipx install .` from a clone. Never `pip install` a name you haven't checked.
 
 ---
 
@@ -490,7 +491,7 @@ only part of Deskmark that makes a network call.
 
 ## Roadmap
 
-### v0.3 (Current)
+### 1.0 (Current)
 
 - [x] `deskmark/v1` format with a digest and a conformance document
 - [x] `save` / `resume` / `list` / `show` / `packet` / `gc`
@@ -498,24 +499,23 @@ only part of Deskmark that makes a network call.
 - [x] Shell hook, installed and removed between markers
 - [x] `look` — one screenshot, one question, your own key
 - [x] 91 tests, zero runtime dependencies
-- [ ] PyPI release — `pipx install deskmark`
 
-### v0.4 (Next)
+### 1.1 (Next)
 
 - [ ] Restore fidelity measured on five real Linux setups, end to end
 - [ ] `resume --check`: report exactly which actions could not be restored
-- [ ] Recorded errors for every restore step, not just failures at spawn
+- [ ] Per-step restore errors, not just failures at spawn
 
 > **Kill criterion:** below 80% of plan actions succeeding on an ordinary
 > VS Code + iTerm + Chrome desk means the premise is wrong and this stops.
 
-### v0.5 (After that)
+### 1.2 (After that)
 
 - [ ] MCP registry, Claude plugin directory, AUR
 - [ ] A second implementation of `deskmark/v1` passing `docs/conformance.md`
 - [ ] `deskmark diff <ref> <ref>` — what changed between two points
 
-### v1.0 (Planned)
+### 2.0 (Planned)
 
 - [ ] Rust implementation with the same CLI surface and the same tests
 - [ ] No Python required on the machine

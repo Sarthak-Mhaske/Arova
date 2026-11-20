@@ -72,7 +72,7 @@ git archive --format=zip --prefix=deskmark/ HEAD:deskmark -o ~/deskmark.zip
 ```bash
 cd deskmark
 git init -b main
-git add . && git commit -m "deskmark 0.3.0"
+git add . && git commit -m "deskmark 1.0.0"
 gh repo create deskmark --private --source . --push   # or --public, your call
 ```
 

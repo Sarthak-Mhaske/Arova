@@ -1,6 +1,6 @@
 # Maintainer: Sarthak Mhaske <mhaske@example.com>
 pkgname=deskmark
-pkgver=0.3.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Resume points for your whole desk: save where your work is, put it back, hand it to an agent"
 arch=('any')
