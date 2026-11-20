@@ -44,6 +44,29 @@ deskmark/
 ├── LICENSE (Apache-2.0)  .editorconfig  .gitignore
 ```
 
+## Getting the folder out of Arova
+
+The project lives on the branch **`arena/35f69639-arova`**, not on `main` —
+`main` is still the old tree and has no `deskmark/` directory. A plain clone
+lands on `main`, which is why `cp -r deskmark` fails with "No such file or
+directory".
+
+Two routes, both history-free:
+
+```bash
+# 1. sparse clone of the right branch (only that folder is written to disk)
+git clone -b arena/35f69639-arova --single-branch \
+    https://github.com/Sarthak-Mhaske/Arova.git arova-tmp
+cp -r arova-tmp/deskmark ~/GIT/deskmark
+rm -rf arova-tmp
+
+# 2. from an existing clone, export just the folder
+git archive --format=zip --prefix=deskmark/ HEAD:deskmark -o ~/deskmark.zip
+```
+
+`git init` afterwards starts a fresh history: the copied folder carries no
+`.git`, because Arova's repo metadata stays behind in the clone.
+
 ## Publish it (once, by hand)
 
 ```bash
