@@ -134,10 +134,9 @@ def classify(url: str, title: str = "") -> Decision:
             elif _domain_matches(host, rule):
                 return Decision(Verdict.DROP, f"withheld: {category}")
 
-    # Match inside the label, not just as a whole one: my.healthprovider.com has
-    # no label called "health" and is exactly the host this rule is for. This
-    # over-drops (investopedia.com goes too). Wrong in that direction is fine;
-    # wrong in the other direction leaks a medical record.
+    # match inside the label, not just as a whole one: my.healthprovider.com has
+    # no label called "health" and is exactly the host this rule is for. it
+    # over-drops (investopedia.com goes too), which is the side to be wrong on.
     host_labels = host.split(".")
     for label in SENSITIVE_LABELS:
         if any(label in part for part in host_labels):

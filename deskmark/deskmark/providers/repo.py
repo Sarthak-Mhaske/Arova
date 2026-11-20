@@ -114,7 +114,7 @@ def working_set_files(repo: RepoState, limit: int = MAX_FILES) -> List[FileRef]:
     for rel in repo.untracked:
         add(rel, "new")
 
-    # Last resort: the tip commit. Weaker than a branch or a failing command,
+    # last resort: the tip commit. weaker than a branch or a failing command,
     # so it only gets used when nothing else said anything.
     if not refs:
         code, names = run(["git", "show", "--name-only", "--pretty=format:"], cwd=repo.root)
