@@ -1,0 +1,550 @@
+"""Tests for the resume point primitive.
+
+These are not coverage tests. Each one pins a promise the product makes:
+
+* a resume point round-trips and can prove it has not been tampered with;
+* nothing sensitive ever enters one;
+* the inferred "why / next" is deterministic and honest about its source;
+* restoring never executes a recorded command;
+* the MCP surface behaves like a protocol implementation, not like a script.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import subprocess
+import time
+
+import pytest
+
+from arova.resume import SCHEMA_ID, store
+from arova.resume.capture import capture
+from arova.resume.intent import derive
+from arova.resume.packet import render, render_json
+from arova.resume.providers import privacy
+from arova.resume.providers.agents import _classify as classify_agent
+from arova.resume.providers.history import read_recent
+from arova.resume.providers.repo import capture_repo, open_questions, working_set_files
+from arova.resume.providers.terminal import capture_from_log
+from arova.resume.restore import apply as apply_plan
+from arova.resume.restore import plan as build_plan
+from arova.resume.schema import (
+    AgentRef,
+    FileRef,
+    Intent,
+    RepoState,
+    ResumePoint,
+    TabRef,
+    TerminalRef,
+)
+
+
+# --------------------------------------------------------------------------
+# fixtures
+# --------------------------------------------------------------------------
+
+@pytest.fixture()
+def home(tmp_path, monkeypatch):
+    """Isolated HOME so no test can read the developer's real browser or store."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".config").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("AROVA_HOME", str(fake_home / ".arova"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(fake_home / ".local" / "share"))
+    return fake_home
+
+
+@pytest.fixture()
+def repo(tmp_path):
+    root = tmp_path / "acme" / "api"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "handler.py").write_text(
+        "def handle(event):\n    # TODO: backfill duplicate-delivery test\n    return True\n"
+    )
+    (root / "src" / "stable.py").write_text("X = 1\n")
+    env = {
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+    subprocess.run(["git", "init", "-q", str(root)], check=True, env={**os.environ, **env})
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "webhooks: verify signature"],
+                   check=True, env={**os.environ, **env})
+    (root / "src" / "handler.py").write_text(
+        "def handle(event):\n    # TODO: backfill duplicate-delivery test\n    return True\n\nRETRIES = 3\n"
+    )
+    (root / "src" / "new_thing.py").write_text("# FIXME: where do idempotency keys live?\n")
+    return root
+
+
+def chrome_db(home, rows):
+    path = home / ".config" / "google-chrome" / "Default"
+    path.mkdir(parents=True, exist_ok=True)
+    db = path / "History"
+    connection = sqlite3.connect(db)
+    connection.execute(
+        "CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT, last_visit_time INTEGER)"
+    )
+    now = int((time.time() + 11644473600) * 1_000_000)
+    for index, (url, title) in enumerate(rows):
+        connection.execute(
+            "INSERT INTO urls (url, title, last_visit_time) VALUES (?,?,?)",
+            (url, title, now - index * 60_000_000),
+        )
+    connection.commit()
+    connection.close()
+    return db
+
+
+# --------------------------------------------------------------------------
+# format
+# --------------------------------------------------------------------------
+
+def test_roundtrip_is_lossless_and_verifiable():
+    point = ResumePoint(
+        name="checkout-idempotency",
+        repo=RepoState(root="/x/api", name="api", branch="feat/checkout", head="abc123",
+                       dirty=["src/a.py"]),
+        files=[FileRef(path="/x/api/src/a.py", reason="dirty")],
+        tabs=[TabRef(url="https://example.com/doc", title="Doc", category="research")],
+        terminals=[TerminalRef(cwd="/x/api", last_command="pytest", exit_code=1)],
+        agents=[AgentRef(kind="claude", cwd="/x/api", session_id="abc")],
+        intent=Intent(why="ship idempotency", next_step="add the test"),
+    )
+    data = point.to_dict()
+    revived = ResumePoint.from_dict(data)
+    assert revived.to_dict() == data
+    assert revived.verify()
+    assert revived.schema == SCHEMA_ID
+
+
+def test_newer_schema_is_refused_not_guessed():
+    with pytest.raises(ValueError, match="newer"):
+        ResumePoint.from_dict({"schema": SCHEMA_ID, "version": 99, "name": "x"})
+
+
+def test_foreign_schema_is_refused():
+    with pytest.raises(ValueError, match="schema"):
+        ResumePoint.from_dict({"schema": "other/v1", "version": 1, "name": "x"})
+
+
+# --------------------------------------------------------------------------
+# privacy
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("url,title", [
+    ("https://chase.com/payments", "Transfer funds"),
+    ("https://accounts.google.com/signin", "Sign in"),
+    ("https://mail.google.com/mail/u/0", "Inbox"),
+    ("https://bank.example.com/statement", "Statement"),
+    ("https://x.com/home", "Home / X"),
+])
+def test_sensitive_pages_are_dropped(url, title):
+    assert privacy.classify(url, title).verdict is privacy.Verdict.DROP
+
+
+@pytest.mark.parametrize("url,title", [
+    ("https://github.com/acme/api/pull/412", "Add checkout idempotency by dev"),
+    ("https://stripe.com/docs/webhooks/best-practices", "Webhook best practices"),
+    ("https://www.postgresql.org/docs/current/sql-insert.html", "INSERT"),
+])
+def test_work_pages_survive_even_when_the_title_looks_sensitive(url, title):
+    """The old filter dropped this PR because its title contained "checkout"."""
+    assert privacy.classify(url, title).verdict is privacy.Verdict.KEEP
+
+
+def test_history_reader_records_what_it_withheld(home):
+    chrome_db(home, [
+        ("https://github.com/acme/api/pull/412", "(3) Add checkout idempotency · PR #412"),
+        ("https://stripe.com/docs/webhooks", "Webhooks | Stripe"),
+        ("https://chase.com/transfer", "Transfer funds | Chase"),
+        ("https://mail.google.com/mail/u/0", "Inbox (17)"),
+    ])
+    tabs, redactions, profiles = read_recent(limit=10, max_age_hours=24)
+    assert profiles == 1
+    urls = [t.url for t in tabs]
+    assert any("github.com" in u for u in urls)
+    assert not any("chase.com" in u or "mail.google.com" in u for u in urls)
+    assert redactions and all("×" in r for r in redactions)
+    # tracking params and badge counters are cleaned
+    assert not any("utm_" in u for u in urls)
+    assert not any(t.title.startswith("(3)") for t in tabs)
+
+
+def test_history_reader_reports_absence_instead_of_pretending(home):
+    tabs, redactions, profiles = read_recent()
+    assert tabs is None and profiles == 0 and redactions == []
+
+
+# --------------------------------------------------------------------------
+# capture
+# --------------------------------------------------------------------------
+
+def test_repo_capture_reads_facts_from_git(repo):
+    state = capture_repo(str(repo))
+    assert state is not None
+    assert state.name == "api"
+    assert "src/handler.py" in [os.path.basename(p) for p in state.dirty] or state.dirty
+    assert state.recent_commits[0]["subject"] == "webhooks: verify signature"
+
+    files = working_set_files(state)
+    paths = {os.path.basename(f.path) for f in files}
+    assert "handler.py" in paths
+    assert all(f.reason != "recent" for f in files)   # dirty work wins over history
+
+    markers = open_questions(state)
+    assert any("duplicate-delivery" in m for m in markers)
+
+
+def test_non_git_directory_degrades_quietly(tmp_path):
+    assert capture_repo(str(tmp_path)) is None
+    result = capture(name="loose", cwd=str(tmp_path), browser=False, agents=False)
+    assert result.point.repo is None
+    assert "repo" in " ".join(result.warnings)
+
+
+def test_shell_log_yields_last_command_and_failure(home):
+    log = home / ".local" / "share" / "arova" / "session_log.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    events = [
+        {"timestamp": now, "type": "terminal_command",
+         "data": {"command": "pytest tests -k retry", "cwd": "/x/api", "cmd_id": "c1"}},
+        {"timestamp": now, "type": "terminal_output",
+         "data": {"command": "pytest tests -k retry", "cmd_id": "c1", "exit_code": 1}},
+        {"timestamp": now, "type": "terminal_command",
+         "data": {"command": "rg X-Idempotency", "cwd": "/x/api", "cmd_id": "c2"}},
+        {"timestamp": now, "type": "terminal_command",
+         "data": {"command": "export API_KEY=sk-live-123", "cwd": "/x/api", "cmd_id": "c3"}},
+    ]
+    log.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+    refs = capture_from_log(window_hours=1)
+    assert len(refs) == 1
+    ref = refs[0]
+    assert ref.last_command == "rg X-Idempotency"
+    assert ref.last_failure == "pytest tests -k retry"
+    assert ref.last_failure_exit == 1
+    assert "sk-live" not in json.dumps(ref.to_dict())
+
+
+def test_capture_writes_a_point_small_enough_to_be_portable(repo, home):
+    log = home / ".local" / "share" / "arova" / "session_log.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    result = capture(name="checkout", cwd=str(repo), browser=False, agents=False)
+    assert result.point.size_bytes() < 20_000
+    assert result.point.repo is not None
+    assert result.point.files[0].reason == "repo-root"
+    assert result.point.intent.next_step          # derived from the TODO
+    assert result.point.intent.next_source == "todo"
+
+
+# --------------------------------------------------------------------------
+# intent
+# --------------------------------------------------------------------------
+
+def test_user_intent_always_wins():
+    repo = RepoState(root="/x", name="x", branch="feat/thing", dirty=["a.py"])
+    intent = derive(repo, ["TODO: something"], [], note="because billing", next_step="ship it")
+    assert intent.why == "because billing" and intent.why_source == "note"
+    assert intent.next_step == "ship it" and intent.next_source == "user"
+
+
+def test_intent_is_deterministic():
+    repo = RepoState(root="/x", name="x", branch="feat/thing")
+    first = derive(repo, ["TODO: a"], []).to_dict()
+    second = derive(repo, ["TODO: a"], []).to_dict()
+    assert first == second
+
+
+def test_failure_without_todo_becomes_the_next_step():
+    term = TerminalRef(cwd="/x/api", last_command="pytest", last_failure="pytest tests", last_failure_exit=2)
+    intent = derive(None, [], [term])
+    assert "pytest tests" in intent.next_step
+    assert intent.next_source == "terminal-exit"
+
+
+# --------------------------------------------------------------------------
+# restore
+# --------------------------------------------------------------------------
+
+def test_restore_plan_never_carries_an_executable_command(repo, home):
+    log = home / ".local" / "share" / "arova" / "session_log.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(json.dumps({
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+        "type": "terminal_command",
+        "data": {"command": "rm -rf /", "cwd": str(repo), "cmd_id": "x"},
+    }) + "\n")
+
+    result = capture(name="danger", cwd=str(repo), browser=False, agents=False)
+    plan = build_plan(result.point)
+
+    for action in plan.actions:
+        assert action.kind in {"editor", "file", "folder", "url", "terminal", "hint"}
+        assert "rm -rf" not in (action.detail or "")
+        assert "rm -rf" not in action.target
+
+    # dry run by default: nothing is launched, and every launchable action says so
+    outcomes = apply_plan(plan, dry_run=True)
+    assert all(o["status"] in {"would-run", "missing", "hint"} for o in outcomes)
+
+
+def test_restore_plan_flags_a_different_host_and_staleness():
+    point = ResumePoint(name="old", host={"hostname": "some-other-laptop"})
+    point.created_at = time.time() - 30 * 86400
+    plan = build_plan(point)
+    assert not plan.host_matches
+    assert any("may not exist" in w for w in plan.warnings)
+    assert any("old" in w for w in plan.warnings)
+
+
+# --------------------------------------------------------------------------
+# store
+# --------------------------------------------------------------------------
+
+def test_store_roundtrip_list_and_gc(home):
+    for index in range(3):
+        point = ResumePoint(name=f"p{index}", intent=Intent(why=f"why {index}"))
+        store.save(point)
+
+    entries = store.list_points()
+    assert len(entries) == 3
+    assert entries[0]["name"] == "p2"                  # newest first
+
+    loaded = store.load("p1")
+    assert loaded.intent.why == "why 1"
+    assert store.load(loaded.id).id == loaded.id
+
+    removed = store.gc(max_points=1, max_age_days=365)
+    assert removed == 2
+    assert len(store.list_points()) == 1
+
+
+def test_store_missing_ref_raises(home):
+    from arova.resume.errors import PointNotFound
+    with pytest.raises(PointNotFound):
+        store.load("nope")
+
+
+# --------------------------------------------------------------------------
+# packet
+# --------------------------------------------------------------------------
+
+def test_packet_stays_within_budget_and_keeps_the_important_parts(repo, home):
+    result = capture(name="big", cwd=str(repo), browser=False, agents=False)
+    result.point.tabs = [TabRef(url=f"https://e.com/{i}", title="t" * 80) for i in range(20)]
+
+    packet = render(result.point, budget_chars=1200)
+    assert len(packet) < 1800
+    assert "Where you were" in packet
+    assert "Why / next" in packet
+    assert "omitted for budget" in packet
+
+
+def test_packet_is_explicit_about_staleness_and_gaps():
+    point = ResumePoint(name="stale")
+    point.created_at = time.time() - 10 * 86400
+    packet = render(point)
+    assert "STALE" in packet
+    assert "not captured" in packet
+    assert "zero pixels" in packet
+
+
+def test_packet_json_is_machine_readable(repo, home):
+    result = capture(name="j", cwd=str(repo), browser=False, agents=False)
+    payload = json.loads(render_json(result.point))
+    assert payload["schema"] == SCHEMA_ID
+    assert payload["repo"]["name"] == "api"
+    assert "provenance" in payload
+
+
+# --------------------------------------------------------------------------
+# agents
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cmdline,expected", [
+    ("node /usr/local/bin/claude --resume abc123", "claude"),
+    ("codex --full-auto", "codex"),
+    ("/usr/bin/python3 -m aider", "aider"),
+    ("grep -r claude .", None),
+    ("vim ~/.claude/settings.json", None),
+])
+def test_agent_process_classification(cmdline, expected):
+    assert classify_agent(cmdline) == expected
+
+
+# --------------------------------------------------------------------------
+# MCP
+# --------------------------------------------------------------------------
+
+def test_mcp_speaks_both_protocol_eras(home):
+    from arova.resume.mcp import handle
+
+    legacy = handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                     "params": {"protocolVersion": "2025-06-18"}})
+    assert legacy["id"] == 1
+    assert legacy["result"]["protocolVersion"] == "2025-06-18"
+
+    modern = handle({"jsonrpc": "2.0", "id": 2, "method": "server/discover",
+                     "params": {"_meta": {}}})
+    assert "2026-07-28" in modern["result"]["supportedVersions"]
+
+    listed = handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+    names = {tool["name"] for tool in listed["result"]["tools"]}
+    assert {"resume_latest", "resume_point_save", "resume_point_get"} <= names
+
+    assert handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+
+    unknown = handle({"jsonrpc": "2.0", "id": 4, "method": "does/not/exist"})
+    assert unknown["error"]["code"] == -32601
+
+
+def test_mcp_save_then_read_roundtrip(repo, home, monkeypatch):
+    from arova.resume import mcp
+
+    saved = mcp.call_tool("resume_point_save", {"name": "from-agent", "cwd": str(repo),
+                                                "next_step": "run the duplicate test"})
+    assert not saved.get("isError")
+    payload = json.loads(saved["content"][0]["text"])
+    assert payload["name"] == "from-agent"
+
+    latest = mcp.call_tool("resume_latest", {})
+    text = latest["content"][0]["text"]
+    assert "run the duplicate test" in text
+    assert "zero pixels" in text
+
+    missing = mcp.call_tool("resume_point_get", {"ref": "nope"})
+    assert missing.get("isError")
+
+
+def test_cli_entrypoint_smoke(repo, home):
+    from arova.resume.cli import main
+
+    assert main(["save", "cli-smoke", "-C", str(repo), "--no-browser", "--no-agents"]) == 0
+    assert main(["list"]) == 0
+    assert main(["show"]) == 0
+    assert main(["resume"]) == 0                      # dry run prints a plan
+
+
+# --------------------------------------------------------------------------
+# store robustness — every one of these was a real crash before
+# --------------------------------------------------------------------------
+
+def test_corrupt_point_file_raises_a_clean_error(home):
+    from arova.resume.errors import CorruptPointError, ResumeError
+
+    point = ResumePoint(name="damaged")
+    path = store.save(point)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("{ not json")
+
+    with pytest.raises(CorruptPointError) as excinfo:
+        store.load(point.id)
+    assert isinstance(excinfo.value, ResumeError)
+    assert "not valid JSON" in str(excinfo.value)
+    assert "hint" in str(excinfo.value)
+
+
+def test_list_drops_damaged_and_missing_points_instead_of_listing_them(home):
+    good = ResumePoint(name="good")
+    bad = ResumePoint(name="bad")
+    store.save(good)
+    bad_path = store.save(bad)
+    with open(bad_path, "w", encoding="utf-8") as handle:
+        handle.write("garbage")
+
+    names = [entry["name"] for entry in store.list_points()]
+    assert names == ["good"]
+
+
+def test_corrupt_index_is_a_cache_miss_not_a_failure(home):
+    point = ResumePoint(name="survivor")
+    store.save(point)
+    with open(store.index_path(), "w", encoding="utf-8") as handle:
+        handle.write("[[[")
+
+    assert [e["name"] for e in store.list_points()] == ["survivor"]
+    assert store.load("survivor").name == "survivor"
+
+
+def test_point_copied_into_the_store_is_picked_up(home):
+    point = ResumePoint(name="imported")
+    path = store.save(point)
+    os.unlink(store.index_path())          # simulate a lost index
+    assert [e["name"] for e in store.list_points()] == ["imported"]
+    assert os.path.exists(path)
+
+
+def test_index_entry_whose_file_is_gone_is_not_served(home):
+    from arova.resume.errors import PointNotFound
+
+    point = ResumePoint(name="ghost")
+    path = store.save(point)
+    os.unlink(path)
+
+    assert store.list_points() == []
+    with pytest.raises(PointNotFound):
+        store.load("ghost")
+
+
+def test_empty_reference_is_refused_not_guessed(home):
+    from arova.resume.errors import PointNotFound
+
+    store.save(ResumePoint(name="anything"))
+    for bad in ("", "   ", None):
+        with pytest.raises(PointNotFound):
+            store.load(bad)
+
+
+def test_ambiguous_prefix_is_refused(home):
+    from arova.resume.errors import PointNotFound
+
+    store.save(ResumePoint(name="feat-alpha"))
+    store.save(ResumePoint(name="feat-beta"))
+    with pytest.raises(PointNotFound):
+        store.load("f")                        # too short to be a prefix
+    assert store.load("feat-a").name == "feat-alpha"
+
+
+def test_paths_are_only_accepted_when_asked_for(home, tmp_path):
+    from arova.resume.errors import PointNotFound
+
+    point = ResumePoint(name="on-disk")
+    path = store.save(point)
+    with pytest.raises(PointNotFound):
+        store.load(path)                       # a path is not a name
+    assert store.load(path, allow_path=True).name == "on-disk"
+
+
+def test_unwritable_store_reports_what_to_do(home, monkeypatch):
+    from arova.resume.errors import StoreError
+
+    monkeypatch.setenv("AROVA_HOME", "/proc/definitely/not/writable")
+    with pytest.raises(StoreError) as excinfo:
+        store.save(ResumePoint(name="nowhere"))
+    assert "AROVA_HOME" in str(excinfo.value)
+
+
+def test_future_timestamp_is_reported_as_clock_skew(home):
+    point = ResumePoint(name="time traveller")
+    point.created_at = time.time() + 3600
+    packet = render(point)
+    assert "future" in packet.lower()
+
+
+def test_gc_and_delete_are_safe_on_an_empty_store(home):
+    assert store.gc() == 0
+    assert store.delete("nothing") is False
+    assert store.total_size_bytes() == 0
+
+
+def test_cli_reports_errors_without_a_traceback(home, capsys):
+    from arova.resume.cli import main
+
+    assert main(["show", "does-not-exist"]) == 2
+    captured = capsys.readouterr()
+    assert "error:" in captured.err
+    assert "hint:" in captured.err
+    assert "Traceback" not in captured.err

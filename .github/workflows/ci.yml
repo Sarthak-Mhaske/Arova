@@ -1,107 +1,122 @@
-name: CI Build & Test
+name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: ["**"]
   pull_request:
-    branches: [main, master]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate-frontend:
-    name: Frontend Build & Typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'frontend/package-lock.json'
-
-      - name: Install Frontend Dependencies
-        working-directory: frontend
-        run: npm ci || npm install
-
-      - name: Type Check & Build
-        working-directory: frontend
-        run: npm run build
-
-  validate-backend:
-    name: Backend Python Validation & Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio
-
-      - name: Python Syntax & Compilation Verification
-        run: |
-          python -m py_compile $(find arova -name "*.py")
-          echo "All Python source files compiled successfully."
-
-      - name: Run Core Tests
-        run: |
-          pytest tests/ -v -k "not (network or hardware)" --maxfail=5 || echo "Tests completed."
-
-  build-multiplatform:
-    name: Cross-Platform Matrix Build
-    needs: [validate-frontend, validate-backend]
+  test:
+    name: Test · ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux
-          - os: windows-latest
-            platform: windows
-          - os: macos-latest
-            platform: macos
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.11", "3.13"]
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux Dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt update
-          sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf libasound2-dev libxdo-dev
-          sudo apt install -y libayatana-appindicator3-dev || sudo apt install -y libappindicator3-dev || true
-
-      - name: Install Dependencies
+      - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          cd frontend && npm ci || npm install
+          python -m pip install -e .
+          python -m pip install pytest
 
-      - name: Build Frontend Assets
+      - name: Compile every module
+        run: python -m compileall -q arova
+
+      - name: Unit tests
+        run: python -m pytest tests -q
+
+      - name: CLI smoke test
+        shell: bash
         run: |
-          cd frontend && npm run build
+          export AROVA_HOME="$RUNNER_TEMP/arova-ci"
+          arova --version
+          arova doctor
+          arova save ci-smoke --no-browser --no-agents
+          arova list
+          arova show --json > /dev/null
+          arova packet > /dev/null
+          arova resume --json > /dev/null
+          arova gc --days 0 > /dev/null
+          echo "smoke ok"
+
+      - name: MCP protocol smoke test
+        shell: bash
+        run: |
+          export AROVA_HOME="$RUNNER_TEMP/arova-ci"
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{}}}' \
+            '{"jsonrpc":"2.0","id":3,"method":"tools/list"}' \
+            | arova mcp > "$RUNNER_TEMP/mcp.out" 2>/dev/null
+          python - <<'PY'
+          import json, os, sys
+          lines = [l for l in open(os.path.join(os.environ["RUNNER_TEMP"], "mcp.out")) if l.strip()]
+          replies = [json.loads(l) for l in lines]
+          assert len(replies) == 3, replies
+          assert all("id" in r for r in replies), "responses must be correlated by id"
+          assert replies[0]["result"]["protocolVersion"] == "2025-06-18"
+          assert "2026-07-28" in replies[1]["result"]["supportedVersions"]
+          assert {"resume_latest", "resume_point_save"} <= {t["name"] for t in replies[2]["result"]["tools"]}
+          print("mcp ok")
+          PY
+
+  package:
+    name: Package · build + install from wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Install the wheel into a clean venv and run it
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/*.whl
+          /tmp/venv/bin/arova --version
+          AROVA_HOME=/tmp/pkg-home /tmp/venv/bin/arova doctor
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  frontend:
+    name: Frontend · typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build

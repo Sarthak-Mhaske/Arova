@@ -1,0 +1,5 @@
+Demo GIFs are rendered into this directory:
+
+    vhs docs/demo.tape      # produces assets/demo.gif
+
+They are generated, not hand-recorded, so they can be re-rendered after any change.

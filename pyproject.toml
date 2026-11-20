@@ -4,26 +4,47 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arova"
-version = "0.1.0"
-description = "A portable cognitive operating runtime platform."
-authors = [
-    {name = "Sarthak Mhaske"}
+version = "0.2.0"
+description = "Resume points for your whole desk. Zero pixels, one command."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [{ name = "Sarthak Mhaske" }]
+keywords = ["resume", "context", "memory", "mcp", "local-first", "pkm", "agents"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
 ]
-dependencies = [
-    "pydantic",
-    "requests",
-    "websockets",
-    "typing_extensions"
-]
+# The resume point primitive is deliberately dependency-free.
+dependencies = []
 
 [project.optional-dependencies]
-desktop = [
-    "PyGObject"
+desktop = ["psutil>=5.9.0"]
+legacy = [
+    "pydantic>=2.0.0",
+    "requests>=2.28.0",
+    "websockets>=12.0",
+    "typing_extensions>=4.8.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
 ]
+dev = ["pytest>=7.0"]
 
 [project.scripts]
+arova = "arova.resume.cli:main"
 arovad = "arova.daemon.main:main"
 arova-gui = "arova.desktop.main:main"
 
+[project.urls]
+Homepage = "https://github.com/Sarthak-Mhaske/Arova"
+Issues = "https://github.com/Sarthak-Mhaske/Arova/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["arova"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["asyncio: legacy async test"]
