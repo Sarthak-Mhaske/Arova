@@ -45,8 +45,8 @@ Everything is plain text. `cat`, `jq`, `grep`, `diff` and `git` all work on it.
 | `-n`, `--note` | — | Why this work exists |
 | `--why` | inferred | Override the inferred `why` |
 | `--next` | inferred | The single next action |
-| `--window` | `12` | Hours of browser and shell history to consider |
-| `--no-browser` | off | Skip browser history entirely |
+| `--window` | `12` | Hours of shell log to consider |
+| `--no-browser` | off | Skip browser session files entirely |
 | `--no-agents` | off | Skip the agent scan |
 | `--json` | off | Print the point as JSON |
 

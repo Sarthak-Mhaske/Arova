@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deskmark"
-version = "1.0.0"
+version = "1.0.1"
 description = "Resume points for your whole desk: save where your work is, put it back, hand it to an agent."
 readme = "README.md"
 license = "Apache-2.0"

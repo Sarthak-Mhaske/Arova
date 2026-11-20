@@ -12,7 +12,7 @@ decides almost every other design choice in this document.
               └───────────┬────────────┘
      ┌────────────┬───────┴──────┬─────────────┬──────────────┐
  providers/repo  providers/   providers/    providers/    intent.py
-   (git)         terminal     history      agents        (why / next)
+   (git)         terminal     sessions     agents        (why / next)
               └───────────┬────────────┘
                           │  schema.py  validate + digest
                           ▼
@@ -46,7 +46,7 @@ decides almost every other design choice in this document.
 
 1. `capture()` resolves `cwd`, then asks each provider for one part of the
    picture: repo (`providers/repo.py`), shells (`providers/terminal.py`), tabs
-   (`providers/history.py`), agents (`providers/agents.py`).
+   (`providers/sessions.py`), agents (`providers/agents.py`).
 2. Each provider goes through `providers.Collector`, which records the value,
    the source, a confidence, and a TTL — or a skip reason with a human-readable
    message. The collector is what `deskmark doctor` and the "not captured" footer

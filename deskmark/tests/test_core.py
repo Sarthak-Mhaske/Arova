@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
+import struct
 import subprocess
 import sys
 import time
@@ -25,7 +25,8 @@ from deskmark.intent import derive
 from deskmark.packet import render, render_json
 from deskmark.providers import privacy
 from deskmark.providers.agents import _classify as classify_agent
-from deskmark.providers.history import read_recent
+from deskmark.providers.agents import _session_from_cmdline as session_from_cmdline
+from deskmark.providers.sessions import lz4_block, open_tabs, parse_chrome_session
 from deskmark.providers.repo import capture_repo, open_questions, working_set_files
 from deskmark.providers.terminal import capture_from_log
 from deskmark.restore import apply as apply_plan
@@ -77,23 +78,69 @@ def repo(tmp_path):
     return root
 
 
-def chrome_db(home, rows):
-    path = home / ".config" / "google-chrome" / "Default"
-    path.mkdir(parents=True, exist_ok=True)
-    db = path / "History"
-    connection = sqlite3.connect(db)
-    connection.execute(
-        "CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT, last_visit_time INTEGER)"
-    )
-    now = int((time.time() + 11644473600) * 1_000_000)
-    for index, (url, title) in enumerate(rows):
-        connection.execute(
-            "INSERT INTO urls (url, title, last_visit_time) VALUES (?,?,?)",
-            (url, title, now - index * 60_000_000),
-        )
-    connection.commit()
-    connection.close()
-    return db
+def _string(text):
+    raw = text.encode()
+    return struct.pack("<I", len(raw)) + raw + b"\0" * (-len(raw) % 4)
+
+
+def _string16(text):
+    raw = text.encode("utf-16-le")
+    return struct.pack("<I", len(raw) // 2) + raw + b"\0" * (-len(raw) % 4)
+
+
+def _navigation(tab_id, url, title, index=0):
+    body = struct.pack("<II", tab_id, index) + _string(url) + _string16(title)
+    return struct.pack("<I", len(body)) + body
+
+
+def chrome_session(home, tabs, closed=(), window=1, close_window=False,
+                   truncated=False, name="Session_13400000000000000"):
+    """Lay out a Session_* file the way chrome does: SNSS, then u16 records."""
+    records = []
+    for tab_id, (url, title) in tabs.items():
+        records.append((6, _navigation(tab_id, url, title)))
+        records.append((0, struct.pack("<II", window, tab_id)))
+    records.extend((16, struct.pack("<I", tab_id)) for tab_id in closed)
+    if close_window:
+        records.append((17, struct.pack("<I", window)))
+
+    blob = b"SNSS" + struct.pack("<I", 1)
+    for command, payload in records:
+        blob += struct.pack("<H", len(payload) + 1) + bytes([command]) + payload
+    if truncated:
+        blob = blob[:-3]
+
+    path = home / ".config" / "google-chrome" / "Default" / "Sessions" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(blob)
+    return path
+
+
+def lz4_literals(payload):
+    """The smallest legal LZ4 block: one sequence, literals only, no match."""
+    size = len(payload)
+    if size < 15:
+        header = bytes([size << 4])
+    else:
+        header = bytearray([0xF0])
+        rest = size - 15
+        while rest >= 255:
+            header.append(255)
+            rest -= 255
+        header.append(rest)
+        header = bytes(header)
+    return header + payload
+
+
+def firefox_session(home, windows):
+    """recovery.jsonlz4 exactly as firefox wraps it: magic, size, lz4 block."""
+    raw = json.dumps({"windows": windows}).encode()
+    blob = b"mozLz40\0" + struct.pack("<I", len(raw)) + lz4_literals(raw)
+    path = home / ".mozilla" / "firefox" / "abc.default" / "sessionstore-backups" / "recovery.jsonlz4"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.parent.joinpath("places.sqlite").write_bytes(b"")
+    path.write_bytes(blob)
+    return path
 
 
 # --- format ---
@@ -149,27 +196,129 @@ def test_work_pages_survive_even_when_the_title_looks_sensitive(url, title):
     assert privacy.classify(url, title).verdict is privacy.Verdict.KEEP
 
 
-def test_history_reader_records_what_it_withheld(home):
-    chrome_db(home, [
-        ("https://github.com/acme/api/pull/412", "(3) Add checkout idempotency · PR #412"),
-        ("https://stripe.com/docs/webhooks", "Webhooks | Stripe"),
-        ("https://chase.com/transfer", "Transfer funds | Chase"),
-        ("https://mail.google.com/mail/u/0", "Inbox (17)"),
-    ])
-    tabs, redactions, profiles = read_recent(limit=10, max_age_hours=24)
+def test_tabs_come_from_the_session_log_and_history_is_ignored(home):
+    """A page visited at nine in the morning is not an open tab at five.
+
+    The old reader took the newest twelve rows out of History, which keeps a row
+    per url for ninety days, so it offered up the whole afternoon.
+    """
+    chrome_session(home, {7: ("https://github.com/acme/api/pull/412", "Add checkout idempotency")})
+    tabs, redactions, profiles = open_tabs(limit=10)
     assert profiles == 1
+    assert [t.url for t in tabs] == ["https://github.com/acme/api/pull/412"]
+    assert tabs[0].category == "development"
+
+
+def test_a_tab_closed_this_run_is_not_offered(home):
+    chrome_session(home, {
+        7: ("https://github.com/acme/api/pull/412", "Add checkout idempotency"),
+        9: ("https://news.ycombinator.com/item?id=1", "Show HN: a widget"),
+    }, closed=[9])
+    tabs, _, _ = open_tabs(limit=10)
+    assert [t.url for t in tabs] == ["https://github.com/acme/api/pull/412"]
+
+
+def test_a_closed_window_takes_its_tabs_with_it(home):
+    chrome_session(home, {7: ("https://github.com/acme/api/pull/412", "PR")}, close_window=True)
+    tabs, _, profiles = open_tabs(limit=10)
+    assert tabs == [] and profiles == 1
+
+
+def test_half_written_session_keeps_what_completed(home):
+    """The browser appends while we read, so the tail can be a torn record."""
+    chrome_session(home, {7: ("https://github.com/acme/api/pull/412", "PR")}, truncated=True)
+    tabs, _, _ = open_tabs(limit=10)
+    assert [t.url for t in tabs] == ["https://github.com/acme/api/pull/412"]
+
+
+def test_a_session_file_that_is_not_a_session_file_is_skipped(home):
+    path = home / ".config" / "google-chrome" / "Default" / "Sessions" / "Session_1"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x00" * 512)
+    tabs, redactions, profiles = open_tabs(limit=10)
+    assert tabs == [] and redactions == [] and profiles == 1
+
+
+def test_private_pages_never_reach_the_point(home):
+    chrome_session(home, {
+        1: ("https://chase.com/transfer", "Transfer funds"),
+        2: ("https://mail.google.com/mail/u/0", "Inbox (17)"),
+        3: ("https://github.com/acme/api/pull/412", "(3) Add checkout idempotency · PR #412"),
+    })
+    tabs, redactions, _ = open_tabs(limit=10)
     urls = [t.url for t in tabs]
-    assert any("github.com" in u for u in urls)
-    assert not any("chase.com" in u or "mail.google.com" in u for u in urls)
+    assert urls == ["https://github.com/acme/api/pull/412"]
     assert redactions and all("×" in r for r in redactions)
-    # tracking params and badge counters get stripped
-    assert not any("utm_" in u for u in urls)
-    assert not any(t.title.startswith("(3)") for t in tabs)
+    assert not tabs[0].title.startswith("(3)")
 
 
-def test_history_reader_reports_absence_instead_of_pretending(home):
-    tabs, redactions, profiles = read_recent()
+def test_browser_internal_pages_are_not_tabs(home):
+    chrome_session(home, {
+        1: ("chrome://newtab/", "New Tab"),
+        2: ("about:blank", "about:blank"),
+        3: ("https://github.com/acme/api/pull/412", "PR"),
+    })
+    tabs, _, _ = open_tabs(limit=10)
+    assert [t.url for t in tabs] == ["https://github.com/acme/api/pull/412"]
+
+
+def test_firefox_session_is_read_out_of_jsonlz4(home):
+    firefox_session(home, [{
+        "tabs": [
+            {"entries": [{"url": "https://example.com/before", "title": "Before"},
+                         {"url": "https://docs.python.org/3/library/lz4", "title": "Docs"}],
+             "index": 2},
+            {"entries": [], "index": 1},
+        ],
+    }])
+    tabs, _, _ = open_tabs(limit=10)
+    # index 2 is the entry firefox was showing, not the last one it kept
+    assert [t.url for t in tabs] == ["https://docs.python.org/3/library/lz4"]
+
+
+def test_lz4_back_references_decode():
+    """Literals plus one overlapping match: 'abc' + (offset 3, length 6)."""
+    block = bytes([0x32]) + b"abc" + b"\x03\x00"
+    assert lz4_block(block, expected=9) == b"abcabcabc"
+
+
+def test_a_corrupt_session_returns_nothing_rather_than_guessing():
+    assert parse_chrome_session(b"SNSS" + struct.pack("<I", 1) + b"\xff\xff") == []
+    assert parse_chrome_session(b"not a session file") == []
+
+
+def test_no_browser_profile_is_reported_as_absent(home):
+    tabs, redactions, profiles = open_tabs()
     assert tabs is None and profiles == 0 and redactions == []
+
+
+def test_a_remote_url_with_a_token_is_redacted_before_it_is_stored(repo):
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "https://me:ghp_secrettoken123456@github.com/acme/private.git"], check=True)
+    notes = []
+    state = capture_repo(str(repo), redactions=notes)
+    assert "ghp_" not in state.remote and "[redacted]" in state.remote
+    assert notes and "×1" in notes[0]
+
+
+def test_only_a_real_todo_counts_as_an_open_question(repo):
+    (repo / "src" / "names.py").write_text(
+        "TODO_ITEMS = ['a']\n"
+        "XXXXXXX = 0\n"
+        "def f():\n"
+        "    # FIXME: the retry loop never gives up\n"
+    )
+    questions = open_questions(capture_repo(str(repo)))
+    assert any("FIXME: the retry loop never gives up" in q for q in questions)
+    assert not any("TODO_ITEMS" in q or "XXXXXXX" in q for q in questions)
+
+
+def test_a_renamed_file_is_tracked_by_its_new_name(repo):
+    (repo / "src" / "stable.py").rename(repo / "src" / "renamed.py")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    state = capture_repo(str(repo))
+    assert "src/renamed.py" in state.staged, state.staged
+    assert not any(" -> " in path for path in state.staged)
 
 
 # --- capture ---
@@ -355,11 +504,56 @@ def test_packet_json_is_machine_readable(repo, home):
     ("node /usr/local/bin/claude --resume abc123", "claude"),
     ("codex --full-auto", "codex"),
     ("/usr/bin/python3 -m aider", "aider"),
+    ("node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js", "claude"),
+    ("npx @google/gemini-cli", "gemini"),
     ("grep -r claude .", None),
     ("vim ~/.claude/settings.json", None),
+    # these two were classified as agents when matching ran over the whole line
+    ("python3 -c import time /home/me/claude-notes/migrate.py", None),
+    ("bash -c sleep 20 claude-helper", None),
 ])
 def test_agent_process_classification(cmdline, expected):
     assert classify_agent(cmdline) == expected
+
+
+@pytest.mark.parametrize("cmdline,expected", [
+    ("claude --resume 8f2c91ab-1111-2222-3333-444455556666",
+     "8f2c91ab-1111-2222-3333-444455556666"),
+    ("codex --session=abcd1234abcd1234", "abcd1234abcd1234"),
+    # -c means --continue to claude and "run this string" to python, and the
+    # guess produced "claude --resume import"
+    ('python3 -c "import time"', ""),
+    ("claude --resume import", ""),
+    ("codex resume abc", ""),
+])
+def test_session_ids_only_come_from_unambiguous_flags(cmdline, expected):
+    assert session_from_cmdline(cmdline) == expected
+
+
+def test_last_failure_is_not_borrowed_from_an_earlier_command(home, monkeypatch):
+    """A failed output with no command text of its own names nothing.
+
+    The old loop kept the previous line's command in a local and blamed that,
+    so a command that had succeeded was reported as the last failure.
+    """
+    log = home / "session_log.jsonl"
+    home.mkdir(exist_ok=True)
+    now = time.time()
+    events = [
+        {"type": "terminal_command", "timestamp": now - 60,
+         "data": {"cmd_id": "a", "cwd": "/x/api", "command": "make build"}},
+        {"type": "terminal_output", "timestamp": now - 59,
+         "data": {"cmd_id": "a", "cwd": "/x/api", "exit_code": 0}},
+        # the command event for z fell outside the window; only its output is here
+        {"type": "terminal_output", "timestamp": now - 30,
+         "data": {"cmd_id": "z", "cwd": "/x/api", "exit_code": 2}},
+    ]
+    log.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+    monkeypatch.setenv("DESKMARK_HOME", str(home))
+    ref = capture_from_log(window_hours=12)[0]
+    assert ref.last_command == "make build"
+    assert ref.exit_code == 2
+    assert ref.last_failure == ""          # make build did not fail
 
 
 # --- mcp ---

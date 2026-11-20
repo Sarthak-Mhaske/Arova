@@ -12,8 +12,8 @@ from typing import List, Optional
 from deskmark import providers
 from deskmark.intent import derive
 from deskmark.providers.agents import capture_agents
-from deskmark.providers.history import read_recent
 from deskmark.providers.repo import capture_repo, open_questions, working_set_files
+from deskmark.providers.sessions import open_tabs
 from deskmark.providers.terminal import capture_from_log, capture_live_shells, merge
 from deskmark.schema import (
     AgentRef,
@@ -50,7 +50,10 @@ def capture(
     cwd = os.path.abspath(cwd or os.getcwd())
     collector = providers.Collector()
 
-    repo = capture_repo(cwd)
+    repo_redactions: List[str] = []
+    repo = capture_repo(cwd, redactions=repo_redactions)
+    for redaction in repo_redactions:
+        collector.redact(redaction)
 
     files: List[FileRef] = []
     questions: List[str] = []
@@ -94,17 +97,17 @@ def capture(
     tabs: List[TabRef] = []
     if browser:
         try:
-            captured, redactions, profiles = read_recent(limit=MAX_TABS, max_age_hours=window_hours)
+            captured, redactions, profiles = open_tabs(limit=MAX_TABS)
             for redaction in redactions:
                 collector.redact(redaction)
             if captured is None:
                 collector.skip("tabs", "no supported browser profile found")
             elif not captured:
-                collector.skip("tabs", f"{profiles} browser profile(s) found, nothing recent")
+                collector.skip("tabs", f"{profiles} browser profile(s) found, nothing open")
             else:
                 tabs = captured
-                collector.add("tabs", [t.to_dict() for t in tabs], "browser-history",
-                              "read-only copy of browser history sqlite", confidence=0.75,
+                collector.add("tabs", [t.to_dict() for t in tabs], "browser-session",
+                              "read-only parse of the browser session log", confidence=0.9,
                               ttl_seconds=6 * 3600)
         except Exception as exc:  # pragma: no cover - defensive
             collector.skip("tabs", str(exc))

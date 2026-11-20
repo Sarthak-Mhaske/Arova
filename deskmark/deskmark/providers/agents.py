@@ -11,20 +11,50 @@ from typing import Dict, List, Optional, Tuple
 
 from deskmark.schema import AgentRef
 
-AGENT_PATTERNS: List[Tuple[str, re.Pattern]] = [
-    ("claude", re.compile(r"\bclaude\b")),
-    ("codex", re.compile(r"\bcodex\b")),
-    ("cursor", re.compile(r"cursor-agent|\bcursor\b")),
-    ("opencode", re.compile(r"\bopencode\b")),
-    ("openclaw", re.compile(r"\bopenclaw\b|\bclawdbot\b|\bmoltbot\b")),
-    ("aider", re.compile(r"\baider\b")),
-    ("gemini", re.compile(r"\bgemini\b")),
-    ("goose", re.compile(r"\bgoose\b")),
-    ("amp", re.compile(r"\bamp\b")),
-]
+# what an agent's executable is called. matching is on argv[0], not on the
+# whole command line: a regex over the line classified "python3 serve.py
+# ~/claude-notes/x.md" as a claude session, which is the kind of false positive
+# that makes the whole section untrustworthy.
+AGENT_EXECUTABLES: Dict[str, str] = {
+    "claude": "claude",
+    "codex": "codex",
+    "cursor-agent": "cursor",
+    "opencode": "opencode",
+    "openclaw": "openclaw",
+    "clawdbot": "openclaw",
+    "moltbot": "openclaw",
+    "aider": "aider",
+    "aider-chat": "aider",
+    "gemini": "gemini",
+    "goose": "goose",
+    "amp": "amp",
+}
 
-# flags that carry a session id, so we can print a resume command later
-SESSION_FLAGS = ("--resume", "-r", "--session", "--session-id", "--continue", "-c")
+# agents that ship as a package get started through a runtime, e.g.
+# node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js. these directory
+# names are specific enough that a project folder won't collide with them.
+AGENT_PACKAGES: Dict[str, str] = {
+    "claude-code": "claude",
+    "codex-cli": "codex",
+    "cursor-agent": "cursor",
+    "opencode-ai": "opencode",
+    "aider-chat": "aider",
+    "gemini-cli": "gemini",
+    "goose-cli": "goose",
+}
+
+# a script run by one of these is an agent if its argument is
+INTERPRETERS = frozenset({
+    "node", "bun", "deno", "npx", "pnpm", "yarn", "uv", "uvx", "pipx", "sh", "bash", "zsh",
+})
+
+# session ids are uuids in practice. "claude --resume import" came out of a
+# python -c "...import time..." being read as a --continue flag.
+SESSION_FLAGS = ("--resume", "--session", "--session-id", "--continue")
+_SESSION_ID = re.compile(
+    r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    r"|[0-9A-Za-z_-]{16,64})$"
+)
 
 
 def _cmdline(pid: str) -> str:
@@ -37,29 +67,59 @@ def _cmdline(pid: str) -> str:
 
 
 def _classify(cmdline: str) -> Optional[str]:
-    lowered = cmdline.lower()
-    # don't count our own process, a grep, or a plain shell as an agent
-    if not cmdline or "deskmark" in lowered and "resume" in lowered:
+    """Which agent this process is, decided on the program it was started as."""
+    parts = cmdline.split()
+    if not parts:
         return None
-    if any(token in lowered for token in ("grep", " rg ", "ps aux", "less ", "vim ", "nvim ")):
+
+    program = os.path.basename(parts[0]).lower()
+    kind = AGENT_EXECUTABLES.get(program)
+    if kind:
+        return kind
+
+    is_interpreter = program in INTERPRETERS or program.startswith("python")
+    if not is_interpreter:
         return None
-    for kind, pattern in AGENT_PATTERNS:
-        if pattern.search(lowered):
-            return kind
+
+    # only the arguments that point at what is being run, not every string on
+    # the line: a path four arguments in is a path, not a program
+    arguments = parts[1:4]
+    for argument in arguments:
+        if argument == "-m":                      # python3 -m aider
+            continue
+        base = os.path.basename(argument).lower()
+        if base in AGENT_EXECUTABLES:
+            return AGENT_EXECUTABLES[base]
+        for segment in argument.lower().split("/"):
+            if segment in AGENT_PACKAGES:
+                return AGENT_PACKAGES[segment]
+
+    if "-m" in arguments:
+        index = arguments.index("-m")
+        if index + 1 < len(arguments):
+            module = arguments[index + 1].split(".")[0].lower()
+            if module in AGENT_EXECUTABLES:
+                return AGENT_EXECUTABLES[module]
     return None
 
 
 def _session_from_cmdline(cmdline: str) -> str:
+    """The session id, if a long flag carried one.
+
+    Short flags are not looked at: -c is --continue here, compile-and-run in
+    python, and a git option, and guessing produced resume commands that run
+    something else entirely.
+    """
     parts = cmdline.split()
     for index, token in enumerate(parts):
         for flag in SESSION_FLAGS:
             if token == flag and index + 1 < len(parts):
                 candidate = parts[index + 1].strip()
-                if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", candidate):
+                if _SESSION_ID.match(candidate):
                     return candidate
             if token.startswith(flag + "="):
                 candidate = token.split("=", 1)[1].strip()
-                if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", candidate):
+                if _SESSION_ID.match(candidate):
                     return candidate
     return ""
 
@@ -114,6 +174,8 @@ def capture_agents(limit: int = 6) -> List[AgentRef]:
         return []
 
     for pid in pids:
+        if pid == str(os.getpid()):
+            continue
         cmdline = _cmdline(pid)
         if not cmdline:
             continue
@@ -128,6 +190,10 @@ def capture_agents(limit: int = 6) -> List[AgentRef]:
         # /proc reports a deleted cwd as "/path (deleted)". There is nothing to
         # resume there, so skip it instead of offering a broken hint.
         if cwd.endswith(" (deleted)"):
+            continue
+        # no readable cwd means another user's process, which we can see but
+        # cannot say anything useful about
+        if not cwd:
             continue
 
         session_id = _session_from_cmdline(cmdline)

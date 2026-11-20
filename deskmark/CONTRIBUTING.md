@@ -9,7 +9,7 @@ you change behaviour, change the test that pins it.
 
 ```bash
 python -m pip install -e .
-python -m pytest -q          # 91 tests, no network, under a second
+python -m pytest -q          # 113 tests, no network, under a second
 ```
 
 **2. Nothing new may leave the machine.** The product's only real asset is that

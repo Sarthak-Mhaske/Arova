@@ -267,15 +267,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                    hook_log if os.path.exists(hook_log) else "run `deskmark hooks`"))
 
     try:
-        from deskmark.providers.history import read_recent
-        tabs, redactions, profiles = read_recent(limit=1, max_age_hours=24 * 365)
-        detail = (f"{profiles} profile(s) found" if profiles
+        from deskmark.providers.sessions import open_tabs
+        tabs, redactions, profiles = open_tabs(limit=200)
+        detail = (f"{profiles} profile(s) found, {len(tabs or [])} tab(s) open" if profiles
                   else "no chrome/brave/chromium/edge/firefox profile found")
         if redactions:
             detail += f" · {sum(int(r.split('×')[-1]) for r in redactions if '×' in r)} page(s) withheld by policy"
-        checks.append(("browser history", profiles > 0, detail))
+        checks.append(("browser sessions", profiles > 0, detail))
     except Exception as exc:
-        checks.append(("browser history", False, str(exc)))
+        checks.append(("browser sessions", False, str(exc)))
 
     claude_dir = os.path.join(os.path.expanduser("~"), ".claude", "projects")
     checks.append(("claude sessions", os.path.isdir(claude_dir),

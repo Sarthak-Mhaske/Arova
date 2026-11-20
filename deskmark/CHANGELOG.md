@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-20
+
+Audit of every capture path, starting from one visible symptom: `resume`
+offered browser pages that had been closed for hours.
+
+### Fixed
+- **Tabs came from history, not from the browser.** Chrome keeps a `History` row
+  per url for 90 days, so "newest twelve rows" was a list of everything touched
+  that afternoon. Tabs are now read from the browser's own session log
+  (`Sessions/Session_*` for chrome, brave, edge, chromium, vivaldi and
+  `sessionstore-backups/recovery.jsonlz4` for firefox). A tab closed during the
+  run carries a close marker and is excluded; the page restored is the entry the
+  tab was showing, not the last one stored; a closed browser reports no tabs
+  instead of yesterday's. Confidence for the section went 0.75 → 0.9 because it
+  is now a fact rather than a guess.
+- **Agent detection matched words, not programs.** `python3 serve.py
+  ~/claude-notes/x.md` was classified as a claude session, and `-c` was read as
+  a session flag, producing `claude --resume import`. Detection is on `argv[0]`
+  or the interpreter's script argument (`python3 -m aider`, `node …/claude-code/cli.js`),
+  and a session id has to look like one.
+- **A failure was attributed to the wrong command.** An output event with no
+  command text of its own borrowed the previous line's command, so a command
+  that had succeeded was named as the last failure.
+- **A git remote url with an embedded token was stored verbatim** and shipped in
+  packets. It is redacted now (`https://me:[redacted]@host/x`) and counted, like
+  every other credential.
+- **`TODO_ITEMS`, `XXXXXXX` and `hackathon` were offered as open questions.** The
+  marker now has to be the whole capitalised word, and untracked files are
+  scanned too, since that is where new work lives.
+- **Renamed files disappeared from the working set**, because git writes the
+  status as `old -> new` and the joined string exists nowhere. The new name is
+  used.
+- **Flatpak browser installs were invisible.** `~/.var/app/<app-id>/…` is
+  searched now, for chrome, brave, chromium, edge, vivaldi and firefox.
+
 ## [1.0.0] - 2026-11-20
 
 First public release. `deskmark/v1` and the CLI surface are frozen at this
@@ -81,4 +116,5 @@ version; anything that changes them gets a major bump.
   `packaging/aur/`, and a tag-triggered `release.yml` that refuses to publish
   when the tag and the package version disagree.
 
+[1.0.1]: https://github.com/<your-username>/deskmark/releases/tag/v1.0.1
 [1.0.0]: https://github.com/<your-username>/deskmark/releases/tag/v1.0.0

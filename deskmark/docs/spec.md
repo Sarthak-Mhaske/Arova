@@ -69,7 +69,7 @@ It is plain JSON. Nothing here requires Deskmark to read it.
 |---|---|---|
 | `repo` | Verified git ground truth at capture time. | High. Re-check before relying on it. |
 | `files` | The working set, ranked. `reason` says why it is here. | Medium. `reason` is the ranking. |
-| `tabs` | Pages that were part of the work, work pages first. | Medium. History, not open tabs. |
+| `tabs` | Pages open in the browser, work pages first. | Medium. From the browser's session log, so a closed tab is not in here. |
 | `terminals` | Where shells were rooted; last command and last failure. | Medium — the command is *context*. |
 | `agents` | Agent processes with a `resume_hint` for continuing the conversation. | Medium. The hint is printed, never run. |
 | `intent` | `why` and `next_step`, each with the evidence it came from. | Low–medium. `*_source` is the caveat. |

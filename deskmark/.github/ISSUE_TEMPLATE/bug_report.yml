@@ -32,6 +32,6 @@ body:
     id: version
     attributes:
       label: Version and platform
-      placeholder: deskmark 1.0.0 · Linux · Hyprland · Python 3.12
+      placeholder: deskmark 1.0.1 · Linux · Hyprland · Python 3.12
     validations:
       required: true

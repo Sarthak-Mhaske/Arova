@@ -9,7 +9,7 @@ stays useful. When it finds nothing, it reports *why* — and that reason is wha
 | Repo, working set, open questions | `providers/repo.py` | 1.0 | 1 h (questions 7 d) |
 | Shells and last failure | `providers/terminal.py` | 0.9 | 6 h |
 | Agents | `providers/agents.py` | 0.8 | 6 h |
-| Browser tabs | `providers/history.py` | 0.6 | 6 h |
+| Browser tabs | `providers/sessions.py` | 0.9 | 6 h |
 | Window title (`look --window` only) | `look/screen.py` | 0.5 | not stored |
 
 Confidence is not decoration: it is what restore uses to decide whether a hint
@@ -25,11 +25,22 @@ Source of truth, and the only part of a point that is objectively verifiable.
 - `git log -1` → the last commit subject, used for *why*
 - Working set = repo root, then changed files, then files an editor had open
   (most specific first), de-duplicated, files that vanished removed
-- Open questions = `TODO` / `FIXME` / `XXX` markers in the working set, capped
+- Open questions = `TODO` / `FIXME` / `HACK` / `XXX` markers in the working set
+  including untracked files, capped, first marker per file. The marker has to be
+  the whole word in capitals, so `TODO_ITEMS`, `XXXXXXX` and "hackathon" are
+  names and placeholders, not questions. A marker inside a string literal still
+  matches; that is the limit of not parsing the language.
+- Renames are followed to the new name, so a renamed file is reported once
+  instead of vanishing into a `old -> new` string that exists nowhere
 
 No git → `repo: null` and a warning. A dirty tree is recorded as counts plus
 paths, never as a patch (a patch would blow the size budget and could contain
 secrets).
+
+The remote url is redacted before it is stored: `https://me:ghp_…@github.com/x`
+becomes `https://me:[redacted]@github.com/x` and the point records
+`remote url credentials ×1`. It is the one field in the repo section where a
+token can sit inside a value that looks like a normal url.
 
 ## Shells (`providers/terminal.py`)
 
@@ -64,7 +75,8 @@ shells.
 
 ## Agents (`providers/agents.py`)
 
-Scans the process list and classifies command lines:
+Scans the process list and decides from the program the process was started as,
+not from the words on the command line:
 
 | Agent | Detected as |
 |-------|-------------|
@@ -75,32 +87,80 @@ Scans the process list and classifies command lines:
 | aider | `aider` |
 | Gemini CLI | `gemini` |
 
+Matching on `argv[0]` is the whole point. A regex over the full line called
+`python3 serve.py ~/claude-notes/x.md` a claude session, and any process that
+happened to mention `gemini` in a path became an agent. The rules are:
+
+- the executable's basename is an agent name (`claude`, `codex`, `cursor-agent`,
+  `opencode`, `aider`, `gemini`, `goose`, `amp`, `openclaw`);
+- or the interpreter's first arguments point at an agent: `python3 -m aider`,
+  `npx @google/gemini-cli`, `node …/@anthropic-ai/claude-code/cli.js`. Package
+  directory names (`claude-code`, `gemini-cli`) are specific enough that a
+  project folder will not collide with them.
+
+Session ids come from long flags only (`--resume`, `--session`, `--session-id`,
+`--continue`) and have to look like an id: a uuid, or 16+ characters with a
+digit. Short flags are ignored on purpose: `-c` means `--continue` to claude and
+"run this string" to python, and reading it as a session id produced
+`claude --resume import`.
+
 The useful output is not "an agent was running", it is `claude --resume 8f2c…`
 in `/home/me/acme/api` — a command you can paste. Capped at 6, one per
-(kind, cwd) pair. Linux-first: on other platforms this degrades to nothing.
+(kind, cwd) pair. A process whose cwd cannot be read (another user's) or whose
+cwd was deleted is skipped rather than reported with a broken hint. Linux-first:
+on other platforms this degrades to nothing.
 
-## Browser tabs (`providers/history.py`)
+## Browser tabs (`providers/sessions.py`)
 
-Reads history databases directly. No extension, no permission prompt, no sync,
-no server.
+Tabs come from the file the browser itself restores from, not from history.
+That distinction is the whole section: chrome keeps a History row per url for
+ninety days, so "the newest twelve rows" is a list of everything you touched
+this afternoon, closed tabs included. The session log is append-only state,
+and closing a tab appends a close marker to it.
 
-| Browser | Profiles |
-|---------|----------|
-| Chrome | `~/.config/google-chrome/*/History` |
-| Chromium | `~/.config/chromium/*/History` |
-| Brave | `~/.config/BraveSoftware/Brave-Browser/*/History` |
-| Edge | `~/.config/microsoft-edge/*/History` |
-| Firefox | `~/.mozilla/firefox/*/places.sqlite`, `~/.var/app/org.mozilla.firefox/…` |
+| Browser | File read | Profiles |
+|---------|-----------|----------|
+| Chrome | `Sessions/Session_*` | `~/.config/google-chrome/`, `.../google-chrome-beta/` |
+| Chromium | same | `~/.config/chromium/` |
+| Brave | same | `~/.config/BraveSoftware/Brave-Browser/` |
+| Edge | same | `~/.config/microsoft-edge/` |
+| Vivaldi | same | `~/.config/vivaldi/` |
+| Firefox | `sessionstore-backups/recovery.jsonlz4` | `~/.mozilla/firefox/*/` |
 
-A running browser holds a lock on its database, so the file is **copied** to a
-temp location and read there, then deleted. Tabs newer than the window (default
-12 h) are kept, de-duplicated by URL, capped at 12, and each one is classified
-before it is stored:
+Flatpak installs are looked for as well (`~/.var/app/<app-id>/…`), and so are
+macOS (`~/Library/Application Support/…`) and Windows (`%LOCALAPPDATA%`,
+`%APPDATA%`) layouts.
 
-- **kept** — a page with a path, e.g. a pull request, an issue, a doc page
-- **downranked** — search result pages, new-tab pages, badge counters
-- **dropped** — sensitive hosts, local files, `javascript:`/`data:` URLs, admin
-  consoles on remote hosts, and anything unclassifiable
+The chromium format is a binary command log, `SNSS` then length-prefixed
+records. Three things in it matter here:
+
+- `Session_*` is the current run; `Tabs_*` is the recently **closed** list and
+  is never read, because restoring closed tabs is the bug this replaced;
+- a tab that has a navigation record and no close marker after it is open, and
+  its selected navigation index is the page you were looking at, not the last
+  one it happens to have stored;
+- files are ranked by the number in the filename, not by mtime, because a
+  profile copied out of a backup keeps the name and loses the timestamp.
+
+Firefox writes a JSON document with an lz4 block inside it (`mozLz40\0`, length,
+block). `lz4_block()` is a small decoder for that block, verified against the
+reference `lz4` implementation on both compression modes.
+
+Everything fails closed. A truncated tail, an unknown version, a record that
+decodes to something that is not a URL: that command is dropped, and if nothing
+decodes the section is skipped with a reason. Nothing is written back to a
+browser file, and a browser that is closed reports no tabs rather than the tabs
+you had open yesterday.
+
+Incognito and private windows are never read: they live in separate files which
+this does not open.
+
+Pages kept are de-duplicated by URL, capped at 12, ordered work first, and
+classified before they are stored:
+
+- **kept** — a page with a host, e.g. a pull request, an issue, a doc page
+- **dropped** — non-http schemes (`chrome://newtab`, `file://`), blank pages,
+  sensitive hosts, and admin consoles on remote hosts
 
 Sensitive is decided on *host and path*, never on the title, and grouped by
 category so the point can say what it withheld without naming it:

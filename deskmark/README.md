@@ -9,7 +9,7 @@
 [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#platform-support)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-6E56CF)](docs/spec.md)
 [![Pixels](https://img.shields.io/badge/pixels%20captured-0-success)](#privacy)
-[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](../../releases)
+[![Version](https://img.shields.io/badge/Version-1.0.1-green.svg)](../../releases)
 
 One command records where your work is — repo, branch, dirty files, open files,
 shells, agents, tabs, and the one line that says why. One command puts it back.
@@ -106,14 +106,14 @@ transcripts above are the scenes.
 
 **The privacy approach:**
 
-- **Local:** repositories, shells, agents, browser history, and the store
+- **Local:** repositories, shells, agents, open browser tabs, and the store
 - **Cloud:** nothing, unless you invoke `deskmark look` with your own API key
 
 ```
 ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
 │   git    │ ──▶ │  shells  │ ──▶ │  agents  │ ──▶ │  tabs    │
-│ (ground) │     │ (hook +  │     │ (process │     │ (history │
-│          │     │  /proc)  │     │  scan)   │     │  db)     │
+│ (ground) │     │ (hook +  │     │ (process │     │ (session │
+│          │     │  /proc)  │     │  scan)   │     │  log)    │
 └──────────┘     └──────────┘     └──────────┘     └──────────┘
                                                          │
 ┌──────────┐     ┌──────────┐     ┌──────────┐         ▼
@@ -129,7 +129,7 @@ transcripts above are the scenes.
 ---
 
 > **⚠️ Status Notice**
-> 1.0.0 freezes the `deskmark/v1` format and the command line surface. Linux is
+> 1.0 freezes the `deskmark/v1` format and the command line surface. Linux is
 > the measured platform for restore fidelity; macOS and Windows are best-effort.
 > See [Platform support](#platform-support).
 >
@@ -362,7 +362,7 @@ store and the session log can never disagree about where they are.
 | Tabs | on | `--no-tabs` skips them |
 | Terminals | on | `--no-shells` skips them |
 | Recorded commands | never executed | shown in the plan, always |
-| History window | 12 h | `save --window 6` narrows it |
+| Shell log window | 12 h | `save --window 6` narrows it |
 | Retention | 200 points / 30 d | `gc` applies both |
 
 Full reference: [docs/config.md](docs/config.md).
@@ -385,7 +385,7 @@ DESKMARK
     ├── repo.py       # git ground truth
     ├── terminal.py   # shell hook + /proc
     ├── agents.py     # agents and resumable session ids
-    ├── history.py    # browser history, copied then read
+    ├── sessions.py   # open tabs, from the browser's session log
     └── privacy.py    # host + path rules. the important one
 ```
 
@@ -498,7 +498,7 @@ only part of Deskmark that makes a network call.
 - [x] MCP server, both protocol revisions, one markdown resource
 - [x] Shell hook, installed and removed between markers
 - [x] `look` — one screenshot, one question, your own key
-- [x] 91 tests, zero runtime dependencies
+- [x] 113 tests, zero runtime dependencies
 
 ### 1.1 (Next)
 
@@ -546,10 +546,10 @@ deskmark/
 │   ├── capture.py intent.py  # what is happening, and why
 │   ├── packet.py restore.py  # agent packet, plan, apply
 │   ├── mcp.py cli.py         # the two surfaces
-│   ├── providers/            # repo, terminals, agents, history, privacy
+│   ├── providers/            # repo, terminals, agents, sessions, privacy
 │   ├── look/                 # one screenshot, on request
 │   └── hooks/shell_hook.sh   # optional shell hook
-├── tests/                    # 91 tests: promises, not coverage
+├── tests/                    # 113 tests: promises, not coverage
 ├── docs/                     # spec, conformance, architecture, providers,
 │                             # config, structure, testing, demo.tape
 ├── packaging/                # AUR PKGBUILD + release checklist
@@ -579,7 +579,7 @@ deskmark/
 ```bash
 git clone https://github.com/<your-username>/deskmark.git
 cd deskmark
-python -m pip install -e . && python -m pytest -q    # 91 tests, ~0.6s
+python -m pip install -e . && python -m pytest -q    # 113 tests, ~0.6s
 git checkout -b feature/your-feature
 git commit -m "feat: add your feature"
 git push origin feature/your-feature

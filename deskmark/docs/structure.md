@@ -20,7 +20,7 @@ deskmark/
 │   │   ├── repo.py              git ground truth, working set, open questions
 │   │   ├── terminal.py          shell hook log + /proc merge
 │   │   ├── agents.py            coding agents and resumable session ids
-│   │   ├── history.py           browser history, copied then read
+│   │   ├── sessions.py          open tabs, from the browser session log
 │   │   └── privacy.py           the allow/drop rules. host + path only
 │   ├── look/
 │   │   ├── screen.py            screenshot + focused window, per platform

@@ -47,6 +47,9 @@ def capture_from_log(window_hours: float = 12.0, limit: int = 8,
     cutoff = time.time() - window_hours * 3600
     by_cwd: Dict[str, TerminalRef] = {}
     cwd_by_cmd: Dict[str, str] = {}
+    # command text per cmd_id, so an output event is attributed to the command
+    # it belongs to instead of to whatever line happened to come before it
+    command_by_cmd: Dict[str, str] = {}
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as handle:
             for line in handle:
@@ -57,35 +60,39 @@ def capture_from_log(window_hours: float = 12.0, limit: int = 8,
                     event = json.loads(line)
                 except ValueError:
                     continue
-                if event.get("type") not in ("terminal_command", "terminal_output"):
+                kind = event.get("type")
+                if kind not in ("terminal_command", "terminal_output"):
                     continue
                 ts = _parse_ts(event.get("timestamp"))
                 if ts and ts < cutoff:
                     continue
                 data = event.get("data") or {}
-                cwd = data.get("cwd") or ""
+                cmd_id = str(data.get("cmd_id") or "")
+                cwd = data.get("cwd") or cwd_by_cmd.get(cmd_id, "")
                 if not cwd:
-                    # output events have no cwd; look it up by cmd_id
-                    cmd_id = str(data.get("cmd_id") or "")
-                    cwd = cwd_by_cmd.get(cmd_id, "")
-                    if not cwd:
-                        continue
-                command = data.get("command") or ""
+                    continue
+
                 ref = by_cwd.get(cwd) or TerminalRef(cwd=cwd)
+                command = data.get("command") or ""
                 if command:
                     command, hits = redact_command(command)
                     leaked += hits
-                    ref.last_command = command[:300]
+                    command = command[:300]
+                    ref.last_command = command
                     ref.at = ts or time.time()
-                if data.get("cmd_id"):
-                    cwd_by_cmd[str(data["cmd_id"])] = cwd
-                if event.get("type") == "terminal_output":
+                    if cmd_id:
+                        command_by_cmd[cmd_id] = command
+                if cmd_id:
+                    cwd_by_cmd[cmd_id] = cwd
+
+                if kind == "terminal_output":
                     exit_code = data.get("exit_code")
                     if isinstance(exit_code, int):
                         ref.exit_code = exit_code
                         ref.duration_ms = data.get("duration_ms")
-                        if exit_code != 0 and command:
-                            ref.last_failure = command[:300]
+                        failed = command or command_by_cmd.get(cmd_id, "")
+                        if exit_code != 0 and failed:
+                            ref.last_failure = failed
                             ref.last_failure_exit = exit_code
                 by_cwd[cwd] = ref
     except OSError:

@@ -31,7 +31,7 @@ format — it is versioned and other implementations will read it.
 ## Commands you will need
 
 ```bash
-python -m pip install -e . && python -m pytest -q    # 91 tests, ~0.5s
+python -m pip install -e . && python -m pytest -q    # 113 tests, ~0.5s
 python -m compileall -q deskmark                     # syntax across all modules
 python -m build                                      # wheel + sdist in dist/
 ./scripts/demo.sh                                    # throwaway desk in /tmp
@@ -47,7 +47,7 @@ a real `~/.deskmark`.
 |-------------|-------|
 | detect a new editor or terminal | `restore.py` (`GUI_EDITORS`, `TERMINALS`) |
 | detect a new agent | `providers/agents.py` (one regex, one test) |
-| read a new browser | `providers/history.py` (`candidate_databases`) |
+| read a new browser | `providers/sessions.py` (`chrome_profile_dirs`, `firefox_profile_dirs`) |
 | add a field to a point | `schema.py`, `docs/spec.md`, a round-trip test |
 | change restore behaviour | `restore.py` — keep `plan()` pure |
 | change the agent surface | `mcp.py`, and the tools table in the README |

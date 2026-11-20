@@ -5,16 +5,21 @@ The only part of a point that can be checked against reality later.
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 
 from deskmark.providers import run
+from deskmark.providers.privacy import redact_command
 from deskmark.schema import FileRef, RepoState
 
 MAX_FILES = 40
 MAX_COMMITS = 5
 MAX_TODO_SCAN_BYTES = 64 * 1024
-TODO_MARKERS = ("TODO", "FIXME", "XXX", "HACK")
+
+# a marker is the whole word, in capitals, and nothing else: TODO_ITEMS is a
+# name, XXXXX is a placeholder, "# TODO: fix the retry" is a question
+TODO_MARKER = re.compile(r"\b(?:TODO|FIXME|HACK|XXX)\b")
 
 
 def repo_root(path: str) -> Optional[str]:
@@ -24,14 +29,22 @@ def repo_root(path: str) -> Optional[str]:
     return None
 
 
-def capture_repo(cwd: str) -> Optional[RepoState]:
+def capture_repo(cwd: str, redactions: Optional[List[str]] = None) -> Optional[RepoState]:
+    """Git state for the repo containing ``cwd``.
+
+    ``redactions`` is an out-parameter, like the one in ``capture_from_log``: a
+    remote url can carry a token (``https://me:ghp_…@github.com/x.git``) and the
+    point records that something was cut out of it without keeping the token.
+    """
     root = repo_root(cwd)
     if not root:
         return None
 
     branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root)[1].strip()
     head = run(["git", "rev-parse", "--short", "HEAD"], cwd=root)[1].strip()
-    remote = run(["git", "remote", "get-url", "origin"], cwd=root)[1].strip()
+    remote, secrets = redact_command(run(["git", "remote", "get-url", "origin"], cwd=root)[1].strip())
+    if secrets and redactions is not None:
+        redactions.append(f"remote url credentials ×{secrets}")
 
     ahead = behind = 0
     code, counts = run(["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd=root)
@@ -51,6 +64,9 @@ def capture_repo(cwd: str) -> Optional[RepoState]:
             index_status, worktree_status, path = line[0], line[1], line[3:].strip()
             if path.startswith('"') and path.endswith('"'):
                 path = path[1:-1]
+            # a rename is written "old -> new"; the file that exists is the new one
+            if " -> " in path:
+                path = path.rsplit(" -> ", 1)[1]
             if index_status == "?" and worktree_status == "?":
                 untracked.append(path)
             elif index_status not in (" ", "?"):
@@ -134,7 +150,8 @@ def open_questions(repo: RepoState, limit: int = 3) -> List[str]:
     or a minified bundle can't stall capture.
     """
     found: List[str] = []
-    candidates = list(dict.fromkeys(repo.dirty + repo.staged))
+    # new files included: an untracked file is where new work and its TODOs are
+    candidates = list(dict.fromkeys(repo.dirty + repo.staged + repo.untracked))
     for rel in candidates:
         if len(found) >= limit:
             break
@@ -148,7 +165,7 @@ def open_questions(repo: RepoState, limit: int = 3) -> List[str]:
             continue
         for line_no, line in enumerate(chunk.splitlines(), start=1):
             stripped = line.strip()
-            if any(marker in stripped for marker in TODO_MARKERS):
+            if TODO_MARKER.search(stripped):
                 text = stripped.lstrip("/#*- ").strip()
                 if text and len(text) < 180:
                     found.append(f"{rel}:{line_no}: {text}")

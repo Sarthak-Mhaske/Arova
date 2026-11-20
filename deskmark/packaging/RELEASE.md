@@ -7,7 +7,7 @@ Do these in order. Every step is checkable; none of them is "looks fine".
 One version, four places — they must agree:
 
 ```bash
-grep -rn "1\.0\.0" \
+grep -rn "1\.0\.1" \
   deskmark/__init__.py pyproject.toml packaging/aur/PKGBUILD \
   packaging/aur/.SRCINFO CHANGELOG.md
 ```
@@ -46,7 +46,7 @@ updated in the same commit.
 ## 5. Tag and publish
 
 ```bash
-git tag -a v1.0.0 -m "deskmark 1.0.0"
+git tag -a v1.0.1 -m "deskmark 1.0.1"
 git push origin main --tags
 ```
 
