@@ -1,11 +1,8 @@
-"""Capture providers.
+"""Capture providers, and the Collector that records what they found.
 
-Each provider answers one question about work in flight and reports how sure
-it is. Providers never raise into the caller: a missing browser, an odd git
-state, or a locked database degrades to "not captured", never to a crash.
-
-That rule is why Deskmark can claim "it never breaks your day": there is no
-capture path that can take the tool down with it.
+A provider answers one question and never raises. Missing browser, odd git
+repo, locked database: that becomes a skip with a reason, so capture can't take
+the CLI down with it.
 """
 from __future__ import annotations
 

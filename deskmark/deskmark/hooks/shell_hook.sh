@@ -1,45 +1,30 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Deskmark shell hook
-# =============================================================================
-# Sources into .bashrc or .zshrc to capture structured terminal telemetry.
+# deskmark shell hook
 #
-# What this captures:
-#   - Every command run (text, cwd, timestamp)
-#   - Exit code and duration of every command
-#   - Output of failed commands (exit code != 0), last 50 lines
+# Sourced from .bashrc / .zshrc. Logs each command, its cwd, exit code and
+# duration to $DESKMARK_HOME/session_log.jsonl, plus the last 50 lines of output
+# when a command fails. Successful output is not captured.
 #
-# What this deliberately does NOT do:
-#   - Wrap the shell in a PTY or script session
-#   - Capture output of successful commands (too much noise, low signal)
-#   - Modify command behavior in any way
-#   - Send data anywhere except ~/.deskmark/session_log.jsonl
+# Install with `deskmark hooks`, which appends the source line for you. Remove
+# it with `deskmark hooks --uninstall`.
 #
-# Installation:
-#   echo 'source ~/.deskmark/shell_hook.sh' >> ~/.zshrc
-#   echo 'source ~/.deskmark/shell_hook.sh' >> ~/.bashrc
-#
-# Removal:
-#   Delete the sourced line from your shell rc file.
-#   The hook leaves no other traces.
-# =============================================================================
+# It does not wrap the shell in a pty, does not change how a command runs, and
+# writes nowhere except that one log file.
 
-# Guard against double-sourcing
+# don't source twice
 if [ -n "$DESKMARK_HOOK_LOADED" ]; then
     return 0
 fi
 export DESKMARK_HOOK_LOADED=1
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+# --- config ---
 
 DESKMARK_LOG_DIR="${DESKMARK_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/deskmark}"
 DESKMARK_LOG_FILE="$DESKMARK_LOG_DIR/session_log.jsonl"
 DESKMARK_TMP_DIR="${XDG_RUNTIME_DIR:-/tmp}/deskmark"
 DESKMARK_OUTPUT_LINES=50  # Lines of output to capture on failure
 
-# Commands to never log (privacy + noise reduction)
+# never logged: secrets and noise
 DESKMARK_IGNORE_COMMANDS=(
     "ls" "ll" "la" "pwd" "cd" "clear" "history"
     "cat" "less" "more" "head" "tail"
@@ -50,8 +35,7 @@ DESKMARK_IGNORE_COMMANDS=(
     "env" "printenv"       # Never capture environment (may contain secrets)
 )
 
-# Commands where output capture is worth the overhead
-# These are the commands whose failure messages matter for reconstruction
+# commands whose failure output is worth keeping
 DESKMARK_CAPTURE_COMMANDS=(
     "pytest" "py.test"
     "cargo" "go"
@@ -63,12 +47,10 @@ DESKMARK_CAPTURE_COMMANDS=(
     "tsc" "eslint" "mypy" "ruff" "flake8"
 )
 
-# Ensure directories exist
+# make sure the log dir exists
 mkdir -p "$DESKMARK_LOG_DIR" "$DESKMARK_TMP_DIR"
 
-# ---------------------------------------------------------------------------
-# Utility: write a JSONL event
-# ---------------------------------------------------------------------------
+# --- write one jsonl event ---
 
 _deskmark_write_event() {
     local event_type="$1"
@@ -83,46 +65,42 @@ _deskmark_write_event() {
         >> "$DESKMARK_LOG_FILE" 2>/dev/null
 }
 
-# ---------------------------------------------------------------------------
-# Utility: escape a string for safe JSON embedding
-# ---------------------------------------------------------------------------
+# --- json escaping ---
 
 _deskmark_json_escape() {
     local str="$1"
-    # Escape backslashes, double quotes, newlines, tabs, carriage returns
+    # backslashes, quotes, newlines, tabs, cr
     str="${str//\\/\\\\}"
     str="${str//\"/\\\"}"
     str="${str//$'\n'/\\n}"
     str="${str//$'\t'/\\t}"
     str="${str//$'\r'/\\r}"
-    # Remove null bytes and other control characters that break JSON
+    # drop null bytes and control chars, they break json
     str=$(printf '%s' "$str" | tr -d '\000-\011\013-\037\177')
     printf '%s' "$str"
 }
 
-# ---------------------------------------------------------------------------
-# Utility: check if a command should be ignored
-# ---------------------------------------------------------------------------
+# --- should this command be logged? ---
 
 _deskmark_should_ignore() {
     local cmd="$1"
     local cmd_base
     cmd_base=$(printf '%s' "$cmd" | awk '{print $1}')
 
-    # Ignore empty commands
+    # nothing to log
     if [ -z "$cmd_base" ]; then
         return 0
     fi
 
-    # Check ignore list
+    # ignore list
     for ignored in "${DESKMARK_IGNORE_COMMANDS[@]}"; do
         if [ "$cmd_base" = "$ignored" ]; then
             return 0
         fi
     done
 
-    # Ignore commands that look like they contain secrets
-    # Heuristic: contains common secret patterns
+    # skip anything that looks like it carries a secret
+    # heuristic, not a parser
     if printf '%s' "$cmd" | grep -qiE '(password|passwd|secret|token|api[_-]?key|auth[_-]?key)\s*='; then
         return 0
     fi
@@ -130,16 +108,14 @@ _deskmark_should_ignore() {
     return 1
 }
 
-# ---------------------------------------------------------------------------
-# Utility: classify command type for richer telemetry
-# ---------------------------------------------------------------------------
+# --- rough command type, used for the "last failure" summary ---
 
 _deskmark_classify_command() {
     local cmd="$1"
     local cmd_base
     cmd_base=$(printf '%s' "$cmd" | awk '{print $1}')
 
-    # Strip deskmark_run prefix transparently
+    # drop the deskmark_run prefix so the log shows the real command
     if [ "$cmd_base" = "deskmark_run" ]; then
         cmd=$(printf '%s' "$cmd" | cut -d' ' -f2-)
         cmd_base=$(printf '%s' "$cmd" | awk '{print $1}')
@@ -169,18 +145,16 @@ _deskmark_classify_command() {
     esac
 }
 
-# ---------------------------------------------------------------------------
-# Output capture: for failed commands only
-# ---------------------------------------------------------------------------
+# --- output capture, failures only ---
 
 _deskmark_start_output_capture() {
     local cmd_id="$1"
     DESKMARK_CAPTURE_FILE="$DESKMARK_TMP_DIR/output_${cmd_id}.tmp"
 
-    # We use a named pipe approach: the command's output goes to
-    # both the terminal (via tee) and our capture file.
-    # This only activates for commands we've determined are worth watching.
-    # We write an empty file to signal capture is active.
+    # capture file plus tee: output goes both to
+    # the terminal and to the file
+    # only armed for the commands listed above
+    # empty marker file means capture is armed
     : > "$DESKMARK_CAPTURE_FILE"
 }
 
@@ -196,9 +170,7 @@ _deskmark_cleanup_capture() {
     rm -f "$capture_file" 2>/dev/null
 }
 
-# ---------------------------------------------------------------------------
-# Core state: track the command currently running
-# ---------------------------------------------------------------------------
+# --- state for the command in flight ---
 
 DESKMARK_CURRENT_CMD=""
 DESKMARK_CMD_START_TIME=0
@@ -218,15 +190,12 @@ _deskmark_should_capture() {
     return 1  # Should not capture
 }
 
-# ---------------------------------------------------------------------------
-# preexec: called just before a command runs
-# Shell: Zsh calls this natively. Bash needs bash-preexec.
-# ---------------------------------------------------------------------------
+# --- preexec. zsh calls this natively; bash needs bash-preexec ---
 
 _deskmark_preexec() {
     local raw_cmd="$1"
 
-    # Skip ignored commands immediately
+    # not worth tracking
     if _deskmark_should_ignore "$raw_cmd"; then
         DESKMARK_CURRENT_CMD=""
         return 0
@@ -249,11 +218,11 @@ _deskmark_preexec() {
     _deskmark_write_event "terminal_command" \
         "{\"command\":\"$escaped_cmd\",\"cwd\":\"$escaped_cwd\",\"cmd_type\":\"$cmd_type\",\"cmd_id\":\"$DESKMARK_CMD_ID\"}"
 
-    # Set up output capture for high-value commands
-    # We write the capture file path to a known location so precmd can find it
+    # arm output capture for the commands we care about
+    # precmd finds the capture file through this path
     if _deskmark_should_capture "$raw_cmd"; then
         DESKMARK_CAPTURE_FILE="$DESKMARK_TMP_DIR/output_${DESKMARK_CMD_ID}.tmp"
-        # Signal to the wrapper that capture is active
+        # tell the wrapper capture is live
         export DESKMARK_ACTIVE_CAPTURE="$DESKMARK_CAPTURE_FILE"
     else
         DESKMARK_CAPTURE_FILE=""
@@ -261,22 +230,17 @@ _deskmark_preexec() {
     fi
 }
 
-# ---------------------------------------------------------------------------
-# deskmark_run: explicit output-capturing wrapper
-# Usage: deskmark_run pytest tests/ -v
-#
-# For the experiment phase, use this prefix for commands where you want
-# output captured. Later versions will make this automatic.
-# ---------------------------------------------------------------------------
+# --- deskmark_run: explicit output capture ---
+# usage: deskmark_run pytest tests/ -v
 deskmark_run() {
     local cmd="$*"
     local capture_file="$DESKMARK_TMP_DIR/deskmark_capture_$$.tmp"
 
-    # Run the command, capturing stdout+stderr to file while showing on terminal
+    # tee to the capture file, still show it on the terminal
     "$@" 2>&1 | tee "$capture_file"
     local exit_code=${PIPESTATUS[0]}
 
-    # Write the captured output as a separate event
+    # emit the captured output as its own event
     if [ -f "$capture_file" ] && [ -s "$capture_file" ]; then
         local output
         output=$(tail -n "$DESKMARK_OUTPUT_LINES" "$capture_file")
@@ -291,14 +255,12 @@ deskmark_run() {
     return $exit_code
 }
 
-# ---------------------------------------------------------------------------
-# precmd: called just after a command finishes
-# ---------------------------------------------------------------------------
+# --- precmd. runs after the command returns ---
 
 _deskmark_precmd() {
     local exit_code=$?
 
-    # Nothing to record if we weren't tracking a command
+    # no command in flight
     if [ -z "$DESKMARK_CURRENT_CMD" ]; then
         return 0
     fi
@@ -310,7 +272,7 @@ _deskmark_precmd() {
     DESKMARK_CAPTURE_FILE=""
     unset DESKMARK_ACTIVE_CAPTURE
 
-    # Calculate duration
+    # duration
     local duration_ms=0
     if [ "$DESKMARK_CMD_START_TIME" -gt 0 ] 2>/dev/null; then
         local end_time
@@ -318,10 +280,10 @@ _deskmark_precmd() {
         duration_ms=$((end_time - DESKMARK_CMD_START_TIME))
     fi
 
-    # Build output field
+    # output field
     local output_json="null"
 
-    # Read from capture file if it exists (set by deskmark_run wrapper)
+    # read the capture file, if deskmark_run wrote one
     if [ -n "$capture_file" ] && [ -f "$capture_file" ] && [ -s "$capture_file" ]; then
         local captured
         captured=$(tail -n "$DESKMARK_OUTPUT_LINES" "$capture_file")
@@ -340,16 +302,14 @@ _deskmark_precmd() {
         "{\"cmd_id\":\"$cmd_id\",\"command\":\"$escaped_cmd\",\"exit_code\":$exit_code,\"duration_ms\":$duration_ms,\"output\":$output_json}"
 }
 
-# ---------------------------------------------------------------------------
-# Shell-specific hook registration
-# ---------------------------------------------------------------------------
+# --- hook registration ---
 
 _deskmark_register_hooks() {
     if [ -n "$ZSH_VERSION" ]; then
-        # Zsh: native preexec and precmd support
-        # Check if preexec_functions array exists (zsh feature)
+        # zsh has preexec/precmd built in
+        # chain into an existing preexec if there is one
         if typeset -f preexec > /dev/null 2>&1; then
-            # preexec already defined, chain into it
+            # somebody already has a preexec
             preexec_functions+=(_deskmark_preexec)
         else
             preexec() { _deskmark_preexec "$1"; }
@@ -362,14 +322,14 @@ _deskmark_register_hooks() {
         fi
 
     elif [ -n "$BASH_VERSION" ]; then
-        # Bash: requires bash-preexec or PROMPT_COMMAND approach
+        # bash: use bash-preexec if it's there, otherwise traps
         if typeset -f __bp_preexec_invoke_exec > /dev/null 2>&1; then
-            # bash-preexec is installed, use it properly
+            # bash-preexec present
             preexec_functions+=(_deskmark_preexec)
             precmd_functions+=(_deskmark_precmd)
         else
-            # Fallback: PROMPT_COMMAND for postcmd, DEBUG trap for precmd
-            # This is less reliable but works without bash-preexec
+            # fallback: PROMPT_COMMAND for the end, DEBUG trap for the start
+            # less reliable, but no extra dependency
             _deskmark_debug_trap() {
                 if [ "$BASH_COMMAND" != "_deskmark_precmd" ] && \
                    [ "$BASH_COMMAND" != "PROMPT_COMMAND" ]; then
@@ -378,7 +338,7 @@ _deskmark_register_hooks() {
             }
             trap '_deskmark_debug_trap' DEBUG
 
-            # Prepend to PROMPT_COMMAND, preserving existing value
+            # prepend, keep whatever was there
             if [ -n "$PROMPT_COMMAND" ]; then
                 PROMPT_COMMAND="_deskmark_precmd; $PROMPT_COMMAND"
             else
@@ -390,16 +350,12 @@ _deskmark_register_hooks() {
 
 _deskmark_register_hooks
 
-# ---------------------------------------------------------------------------
-# Session start event
-# ---------------------------------------------------------------------------
+# --- session start ---
 
 _deskmark_write_event "session_start" \
     "{\"shell\":\"${ZSH_VERSION:+zsh}${BASH_VERSION:+bash}\",\"pid\":$$,\"cwd\":\"$(_deskmark_json_escape "$PWD")\"}"
 
-# ---------------------------------------------------------------------------
-# Cleanup on shell exit
-# ---------------------------------------------------------------------------
+# --- cleanup on exit ---
 
 _deskmark_cleanup_session() {
     _deskmark_write_event "session_end" "{\"pid\":$$}"

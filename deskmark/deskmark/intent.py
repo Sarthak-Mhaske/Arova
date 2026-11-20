@@ -1,11 +1,8 @@
-"""Deriving *why* and *what next* without an LLM.
+"""Works out "why" and "next" from what was already captured.
 
-This is the part every other capture tool skips, and the reason resume points
-are more useful than screenshots. It is deliberately deterministic: the same
-state produces the same intent, it costs nothing, it works offline, and every
-claim carries the evidence it came from (``why_source`` / ``next_source``).
-
-An optional human note always wins over anything inferred.
+No model, no network, deterministic: same state in, same intent out. Every
+answer records where it came from (why_source / next_source), and --why or
+--next from the user always wins over anything inferred.
 """
 from __future__ import annotations
 
@@ -20,7 +17,7 @@ VAGUE_BRANCHES = {"main", "master", "develop", "dev", "trunk"}
 def _humanize_branch(branch: str) -> str:
     import re
     parts = branch.split("/")[-1]
-    # Drop generated identifiers like "35f69639-" or "ARO-142-" from the slug.
+    # strip generated ids ("35f69639-", "ARO-142-") so slugs stay readable
     parts = re.sub(r"^[0-9a-f]{6,}-", "", parts)
     parts = re.sub(r"^[A-Z]{2,8}-\d+[-_]", "", parts)
     return parts.replace("-", " ").replace("_", " ").strip()
@@ -37,7 +34,8 @@ def derive(repo: Optional[RepoState],
 
     intent = Intent(note=note.strip(), open_questions=list(questions))
 
-    # ---- why ---------------------------------------------------------
+    # --- why ---
+
     if why.strip():
         intent.why, intent.why_source = why.strip(), "user"
     elif note.strip():
@@ -52,7 +50,8 @@ def derive(repo: Optional[RepoState],
     if repo and repo.diffstat and intent.why and intent.why_source in ("branch", "commit"):
         intent.why = f"{intent.why} ({repo.diffstat})"
 
-    # ---- next --------------------------------------------------------
+    # --- next ---
+
     if next_step.strip():
         intent.next_step, intent.next_source = next_step.strip(), "user"
     elif questions:

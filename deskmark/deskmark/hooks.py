@@ -1,11 +1,7 @@
-"""Opt-in shell hooks.
+"""Installing and removing the shell hook.
 
-Without a hook Deskmark still works: it can see live shells and git state. With
-the hook it also knows what last failed in which directory, which is what makes
-the "next step" line useful.
-
-Installing is one marked block in your rc file; uninstalling removes exactly
-that block and nothing else.
+Without the hook we still get live shells and git state. With it we also know
+which command last failed where, which is what makes the "next" line useful.
 """
 from __future__ import annotations
 

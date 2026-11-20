@@ -1,12 +1,9 @@
-"""Reading browser history directly, without an extension and without a server.
+"""Browser history, read straight out of the sqlite files.
 
-Two facts shape this module:
+Browsers keep the database locked while they run, so we copy it to a temp file,
+read the copy and delete it. No extension, no permissions, no sync.
 
-1. Browser databases are locked while the browser runs, so we copy then read.
-   That is why Deskmark needs no extension, no permissions prompt, and no sync.
-2. Filtering must happen before anything reaches disk. The policy lives in
-   :mod:`privacy` and every drop is counted so the resume point can say what
-   it withheld.
+Filtering happens before anything is written; the policy lives in privacy.py.
 """
 from __future__ import annotations
 
@@ -36,7 +33,7 @@ CHROME_CHAINS = (
     ("arc", "Arc/User Data"),
 )
 
-# Chrome timestamps are microseconds since 1601-01-01; Firefox uses 1970.
+# chrome counts microseconds from 1601, firefox counts seconds from 1970
 CHROME_EPOCH_OFFSET_US = 11644473600 * 1_000_000
 
 
@@ -88,6 +85,8 @@ def _query(path: str, engine: str, since: float, limit: int) -> List[Tuple[str, 
     try:
         fd, tmp = tempfile.mkstemp(suffix=".sqlite")
         os.close(fd)
+        # only the main db file is copied, not -wal, so anything the browser
+        # hasn't checkpointed yet (usually the last few minutes) is missing here.
         shutil.copy2(path, tmp)
         connection = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True, timeout=2.0)
         try:
@@ -165,7 +164,7 @@ def read_recent(limit: int = 12, max_age_hours: float = 12.0) -> Tuple[Optional[
         kept.append(TabRef(url=cleaned, title=clean_title[:200] or cleaned,
                            category=categorize(cleaned, clean_title), host=host))
 
-    # Work pages first: resuming into documentation beats resuming into news.
+    # work pages first: resuming into docs beats resuming into news
     priority = {"development": 0, "research": 1, "general": 2}
     kept.sort(key=lambda tab: priority.get(tab.category, 3))
     return kept[:limit], redaction_summary(dropped), len(databases)

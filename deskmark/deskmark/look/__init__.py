@@ -1,12 +1,8 @@
-"""Looking at the screen, on purpose, once.
+"""One screenshot, one question, on demand.
 
-``deskmark look`` answers one question — *what am I looking at, and what does it
-mean* — without a daemon, without continuous capture, and without pixels
-leaving the machine unless you asked for an answer.
-
-Everything in here is best-effort against whatever the machine actually has:
-PIL if it is installed, otherwise the CLI tool the platform ships, otherwise a
-clear error that says what to install. Nothing is required.
+There is no capture loop here. You ask, it takes one shot, sends it to the
+provider you configured, prints the answer and forgets it. No tool and no key
+are both just errors with a hint.
 """
 from __future__ import annotations
 

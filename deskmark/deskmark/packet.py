@@ -1,9 +1,8 @@
-"""Compiling a resume point into a context packet.
+"""Renders a point as text an agent can read.
 
-A packet is what an agent reads. It has to be small (a few thousand
-characters), ordered by usefulness, honest about gaps, and explicit about
-staleness — because an agent that cannot tell fresh from stale will confidently
-continue work that no longer exists.
+Bounded by a character budget and ordered by usefulness. It says what is
+missing and what is stale, because an agent that can't tell fresh from stale
+will happily continue work that no longer exists.
 """
 from __future__ import annotations
 
@@ -73,7 +72,7 @@ def _tabs_block(point: ResumePoint, limit: int = 10) -> str:
         return ""
     grouped: Dict[str, List[str]] = {}
     for tab in point.tabs:
-        grouped.setdefault(tab.category, []).append(f"{tab.title} — {tab.url}")
+        grouped.setdefault(tab.category, []).append(f"{tab.title}  {tab.url}")
     lines = ["was reading"]
     for category, items in grouped.items():
         for item in items[:limit]:
@@ -88,7 +87,7 @@ def _terminals_block(point: ResumePoint) -> str:
     for term in point.terminals:
         detail = term.last_command or "(no command recorded)"
         tail = f"  (exit {term.exit_code})" if term.exit_code not in (None, 0) else ""
-        lines.append(f"  {term.cwd} — last: `{detail}`{tail}")
+        lines.append(f"  {term.cwd}  last: `{detail}`{tail}")
         if term.last_failure and term.last_failure != term.last_command:
             lines.append(f"    last failure: `{term.last_failure}` (exit {term.last_failure_exit})")
     return "\n".join(lines)
@@ -99,7 +98,7 @@ def _agents_block(point: ResumePoint) -> str:
         return ""
     lines = ["agents that were running"]
     for agent in point.agents:
-        hint = f" — resume with `{agent.resume_hint}`" if agent.resume_hint else ""
+        hint = f"  resume with `{agent.resume_hint}`" if agent.resume_hint else ""
         lines.append(f"  {agent.kind} in {agent.cwd or '?'}{hint}")
     return "\n".join(lines)
 
@@ -132,9 +131,9 @@ def render(point: ResumePoint, budget_chars: int = DEFAULT_BUDGET_CHARS,
     now = now or time.time()
     age = human_age(point.age_seconds(now))
     if point.created_at - now > 60:
-        staleness = "timestamp is in the future — check the clock"
+        staleness = "timestamp is in the future, check the clock"
     elif point.is_stale(now):
-        staleness = "STALE — verify before continuing"
+        staleness = "STALE, verify before continuing"
     else:
         staleness = "fresh"
 

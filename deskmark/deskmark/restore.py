@@ -1,12 +1,8 @@
-"""Restoring a resume point.
+"""Turns a point into a plan, and optionally carries it out.
 
-Two rules, enforced in code rather than in documentation:
-
-* **Dry-run is the default.** You always see the plan before anything opens.
-* **Recorded commands are never executed.** A resume point is untrusted input:
-  it may have travelled from another machine, or been written by an agent.
-  Restore reopens files, folders, URLs and terminal working directories — it
-  never replays a shell, and it never pipes anything into one.
+plan() touches nothing; apply() only runs when the user passes --yes. Recorded
+commands are printed, never executed: a point may have come from another
+machine or from an agent, so it is untrusted input.
 """
 from __future__ import annotations
 
@@ -103,11 +99,11 @@ def plan(point: ResumePoint, include_files: bool = True, include_terminals: bool
             f"point was captured on {current_host}; paths may not exist on this machine"
         )
     if point.is_stale():
-        result.warnings.append(f"point is {int(point.age_seconds() // 3600)}h old — verify before trusting it")
+        result.warnings.append(f"point is {int(point.age_seconds() // 3600)}h old, verify before trusting it")
 
     editor = editor_command()
 
-    # 1. The workspace root, opened once in the editor (or the file manager).
+    # 1. workspace root, opened once in the editor (or the file manager)
     root_action = None
     if point.repo and os.path.isdir(point.repo.root):
         if editor:
@@ -123,7 +119,7 @@ def plan(point: ResumePoint, include_files: bool = True, include_terminals: bool
     if root_action:
         result.actions.append(root_action)
 
-    # 2. Files that were open or in flight.
+    # 2. files that were open or in flight
     if include_files:
         seen = {point.repo.root} if point.repo else set()
         count = 0
@@ -142,13 +138,13 @@ def plan(point: ResumePoint, include_files: bool = True, include_terminals: bool
             result.actions.append(RestoreAction("file", ref.path, label=os.path.basename(ref.path),
                                                 detail=detail, optional=True))
 
-    # 3. Tabs — these are the cheapest, highest-signal part of a resume.
+    # 3. tabs. cheapest and highest signal part of a resume
     if include_urls:
         for tab in point.tabs:
             result.actions.append(RestoreAction("url", tab.url, label=tab.title,
                                                 detail=f"[{tab.category}]", optional=True))
 
-    # 4. Shells: reopen the directory, never the command.
+    # 4. shells: reopen the directory, never the command
     if include_terminals:
         for term in point.terminals:
             if not os.path.isdir(term.cwd):
@@ -160,7 +156,7 @@ def plan(point: ResumePoint, include_files: bool = True, include_terminals: bool
                 optional=True,
             ))
 
-    # 5. Agents: print how to continue, never continue for the human.
+    # 5. agents: print how to continue. continuing for the human is not our job
     for agent in point.agents:
         result.actions.append(RestoreAction("hint", agent.cwd or "", label=agent.kind,
                                             detail=agent.resume_hint or agent.kind))

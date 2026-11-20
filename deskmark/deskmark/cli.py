@@ -1,7 +1,7 @@
-"""The human surface: one command to put your desk back.
+"""Command line surface: save, resume, and the small tools around them.
 
-``deskmark save`` / ``deskmark resume`` is the whole product in two verbs.
-Everything else is a power tool around that pair.
+All printing happens here. The modules return values so tests can check them
+without parsing output.
 """
 from __future__ import annotations
 
@@ -57,9 +57,7 @@ def _compact(n: int) -> str:
     return f"{n / (1024 * 1024):.1f} MB"
 
 
-# --------------------------------------------------------------------------
-# commands
-# --------------------------------------------------------------------------
+# --- commands ---
 
 def cmd_save(args: argparse.Namespace) -> int:
     name = args.name or _default_name()
@@ -106,7 +104,7 @@ def cmd_save(args: argparse.Namespace) -> int:
     if point.intent.next_step:
         print(f"  {dim('next')}    {point.intent.next_step} {dim('(from ' + point.intent.next_source + ')')}")
     else:
-        hint = 'nothing recorded — add --next "…" or a TODO in a changed file'
+        hint = 'nothing recorded. add --next "..." or a TODO in a changed file'
         print(f"  {dim('next')}    {dim(hint)}")
     print(f"  {dim('saved')}   {path}")
     for warning in result.warnings:
@@ -168,7 +166,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         print()
 
     if not args.yes:
-        print(dim("dry run — nothing was opened. Re-run with --yes to restore."))
+        print(dim("dry run, nothing was opened. re-run with --yes to restore."))
         return 0
 
     outcomes = apply_plan(plan_obj, dry_run=False, include_optional=not args.core_only)
@@ -260,8 +258,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     editor = editor_command()
     checks.append(("editor", bool(editor), " ".join(editor) if editor else "set DESKMARK_EDITOR (e.g. code)"))
 
-    # Same function the reader uses. Recomputing the path here is how doctor
-    # ends up telling you to install a hook that is already installed.
+    # same function the reader uses. recomputing it here is how doctor ended up
+    # telling people to install a hook they already had.
     from deskmark.providers.terminal import log_path
 
     hook_log = log_path()
@@ -286,7 +284,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     tools = _look_tools()
     checks.append(("screenshot", bool(tools),
                    (", ".join(tools) + " (run `deskmark look` to test it)") if tools
-                   else "none found — install grim (Wayland) or scrot (X11)"))
+                   else "none found, install grim (Wayland) or scrot (X11)"))
     if args.look_keys:
         keyed = [name for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
                  if os.environ.get(name)]
@@ -306,9 +304,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-# --------------------------------------------------------------------------
-# helpers
-# --------------------------------------------------------------------------
+# --- helpers ---
 
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}" + ("" if count == 1 else "s")
@@ -325,8 +321,8 @@ def _load(ref: Optional[str]) -> ResumePoint:
         try:
             return store.load(ref)
         except PointNotFound:
-            # Ergonomics: allow `deskmark show ./point.json`. Paths are only ever
-            # accepted from the CLI, never from HTTP or MCP.
+            # `deskmark show ./point.json`. allowed from the CLI only, never
+            # from an MCP or network caller.
             if os.sep in ref or ref.endswith(".json"):
                 return store.load(ref, allow_path=True)
             raise

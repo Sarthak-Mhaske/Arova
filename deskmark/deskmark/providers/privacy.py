@@ -1,16 +1,9 @@
 """What is allowed into a resume point.
 
-This is the most important file in the product, so it is explicit rather than
-clever:
-
-* Decide on the **host and path**, never on free-text titles. A filter that
-  matches the word "checkout" inside a pull request title silently deletes real
-  work, and silent deletion is worse than no capture at all.
-* Two outcomes only: **keep** or **drop**. Anything dropped is counted, and the
-  count is written into the resume point, so the human can see that something
-  was withheld instead of assuming the tool saw everything.
-* Being wrong in the direction of dropping is acceptable for credentials,
-  payments, health and identity. Being wrong in the direction of keeping is not.
+Decisions use the host and path only, never the page title: a filter that
+matched text would quietly delete real work. Anything dropped is counted and
+stored as a category, so the point says something was withheld without saying
+what.
 """
 from __future__ import annotations
 
@@ -26,13 +19,12 @@ class Verdict(str, Enum):
     DROP = "drop"
 
 
-# Hosts that must never appear in a resume point, grouped by why. Matched
-# against the registrable domain or one of its subdomains. A rule may carry a
-# path prefix ("stripe.com/dashboard").
+# Blocked hosts, grouped by the reason that gets written into the point.
+# Matching is on the registrable domain or a subdomain of it; a rule may also
+# carry a path prefix, like "stripe.com/dashboard".
 #
-# The group name is what gets written into the point. The host is not: "you were
-# on a banking site" is a fact worth hiding, and printing the hostname in the
-# summary would leak exactly what the drop was protecting.
+# The group name goes into the point, the host does not. Writing "chase.com" in
+# the summary would leak the thing the drop was for.
 BLOCKED_DOMAINS: Dict[str, Tuple[str, ...]] = {
     "banking": (
         "chase.com", "wellsfargo.com", "bankofamerica.com", "citibank.com", "hsbc.com",
@@ -142,10 +134,10 @@ def classify(url: str, title: str = "") -> Decision:
             elif _domain_matches(host, rule):
                 return Decision(Verdict.DROP, f"withheld: {category}")
 
-    # A label the domain carries anywhere, not just as a whole word:
-    # "my.healthprovider.com" has no "health" label, and it is exactly the kind
-    # of host this rule exists for. The bias is deliberate — over-dropping costs
-    # a research tab, under-dropping leaks a medical record.
+    # Match inside the label, not just as a whole one: my.healthprovider.com has
+    # no label called "health" and is exactly the host this rule is for. This
+    # over-drops (investopedia.com goes too). Wrong in that direction is fine;
+    # wrong in the other direction leaks a medical record.
     host_labels = host.split(".")
     for label in SENSITIVE_LABELS:
         if any(label in part for part in host_labels):
@@ -156,8 +148,8 @@ def classify(url: str, title: str = "") -> Decision:
         if fragment in haystack:
             return Decision(Verdict.DROP, f"withheld: auth or payment path ({fragment.strip('/')})")
 
-    # An admin console on someone else's machine is not a page you resume; on
-    # localhost it usually is (a dev server you are working on).
+    # /admin on a remote host is somebody else's console. On localhost it's your
+    # dev server, which is the thing restore exists for.
     if not local and (path.startswith("/admin") or path.startswith("/wp-admin")
                       or path.startswith("/manage")):
         return Decision(Verdict.DROP, "withheld: admin console")
@@ -212,10 +204,9 @@ def categorize(url: str, title: str = "") -> str:
 
 REDACTED = "[redacted]"
 
-# Order matters: the keyword rule runs before the token-shape rule so that
-# ``--password=sk-live-123`` becomes ``--password=[redacted]`` and not a
-# half-redacted string. Every rule is anchored on a shape, never on a word
-# appearing somewhere in a sentence.
+# Order matters: the keyword rule runs first so "--password=sk-live-123" comes
+# out as "--password=[redacted]" rather than half redacted. Every rule keys off
+# a shape, not off a word turning up somewhere in a sentence.
 _SECRET_RULES = (
     # key = value, key: value, --key=value, "key": "value"
     (re.compile(
@@ -223,14 +214,14 @@ _SECRET_RULES = (
         r"|access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)\b"
         r"(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1\2" + REDACTED),
     # long flags with a space: --password hunter2, --token abc.
-    # Short flags are deliberately not inferred: `-p` is a port, a print, or a
-    # password depending on the program, and guessing would delete real context.
+    # short flags are not inferred: -p is a port, a print or a password
+    # depending on the program, and guessing deletes real context.
     (re.compile(
         r"(?i)(--(?:password|passwd|token|api-key|apikey|secret|auth-token"
         r"|access-token|client-secret)\s+)(\S+)"), r"\1" + REDACTED),
     # Authorization: Bearer <token>
     (re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._\-]{6,})"), r"\1" + REDACTED),
-    # scheme://user:password@host  — the case a keyword rule cannot see
+    # scheme://user:pass@host -- no keyword in it for the rules above to catch
     (re.compile(r"(\b[a-z][a-z0-9+.\-]*://[^/\s:@]+):([^/\s@]+)@"), r"\1:" + REDACTED + "@"),
     # well-known token shapes, with no keyword in front of them
     (re.compile(
@@ -242,11 +233,11 @@ _SECRET_RULES = (
 
 
 def redact_command(command: str) -> Tuple[str, int]:
-    """Return (safe text, number of redactions). Never raises, never guesses.
+    """Return (safe text, number of redactions).
 
-    A command is not dropped for looking secret: the last failing command is the
-    most useful line in a resume point, so it is kept with the credential taken
-    out. Dropping it hides both the secret and the work.
+    The command is kept and the credential cut out. Dropping the whole line
+    would hide the work along with the secret, and the last failing command is
+    the most useful thing in a point.
     """
     text = command or ""
     total = 0

@@ -1,9 +1,7 @@
-"""Errors that a user or an agent is allowed to see.
+"""Errors a user or an agent is allowed to see.
 
-The rule: no raw ``OSError`` or ``JSONDecodeError`` ever escapes to a caller.
-Every failure says what happened, where, and what to do about it — because the
-caller is either a human in a terminal or an agent that will otherwise report
-"something went wrong" to that human.
+No raw OSError or JSONDecodeError should reach a caller. Each error carries a
+message and, when there is one, a hint that says what to do about it.
 """
 from __future__ import annotations
 
@@ -21,8 +19,8 @@ class DeskmarkError(Exception):
 
 
 class AmbiguousReference(DeskmarkError):
-    """A reference matched more than one resume point. Restoring the wrong desk
-    is worse than an error message, so this is never resolved by guessing."""
+    """A reference matched more than one point. Refused, never resolved by
+    picking one: restoring the wrong desk costs more than an error."""
 
 
 class StoreError(DeskmarkError):

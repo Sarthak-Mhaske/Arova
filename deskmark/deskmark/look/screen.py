@@ -1,10 +1,8 @@
-"""Screen capture and the active window, using whatever this machine provides.
+"""Screenshot and active-window lookup.
 
-No dependencies, no daemon, no continuous capture. One screenshot is taken when
-a human asks for one, and it is a file on disk that the caller owns.
-
-The rule for every function here: if the machine cannot do it, say what to
-install instead of raising a bare ``FileNotFoundError``.
+Tries Pillow first, then whatever CLI the platform ships. Failures come back as
+a list of what was tried, because "no screenshot tool" on its own tells nobody
+what to install.
 """
 from __future__ import annotations
 
@@ -22,9 +20,8 @@ from deskmark.look.errors import LookError
 
 TIMEOUT = 10
 
-# Ordered per platform: the first tool that exists on PATH wins. grim is first
-# on Wayland because it is the only one that works on wlroots compositors
-# (Hyprland, sway) without a portal round-trip.
+# per platform, first one on PATH wins. grim leads on wayland: it is the only
+# one that works on wlroots (hyprland, sway) without going through a portal.
 TOOLS = {
     "darwin": ["screencapture"],
     "linux-wayland": ["grim", "grimblast", "gnome-screenshot", "spectacle", "flameshot"],
@@ -90,7 +87,7 @@ class WindowRef:
         return {"app": self.app, "title": self.title, "method": self.method}
 
     def describe(self) -> str:
-        label = " — ".join(part for part in (self.app, self.title) if part)
+        label = " - ".join(part for part in (self.app, self.title) if part)
         return label or "an unnamed window"
 
 
@@ -166,7 +163,7 @@ def capture(path: Optional[str] = None) -> Capture:
     if not method or not os.path.exists(target):
         hint = INSTALL_HINT.get(_platform_key(), "install a screenshot tool")
         if tried:
-            hint = "tried " + "; ".join(tried) + " — " + hint
+            hint = "tried " + "; ".join(tried) + ". " + hint
         raise LookError("this machine has no working screenshot tool", hint=hint)
 
     size = os.path.getsize(target)
@@ -187,9 +184,7 @@ def _powershell_screenshot(target: str) -> None:
     _run(["powershell", "-NoProfile", "-Command", script])
 
 
-# ---------------------------------------------------------------------------
-# the active window
-# ---------------------------------------------------------------------------
+# --- active window ---
 
 def active_window() -> WindowRef:
     """Best-effort: which window has focus, and what is in it."""

@@ -1,13 +1,8 @@
-"""Terminals — where your shells were rooted, and what last failed there.
+"""Where the shells were, and what last failed there.
 
-Two independent sources, because both are partial:
-
-* ``shell-hook``: the JSONL log written by ``deskmark/hooks/shell_hook.sh``.
-  Gives command, cwd, exit code and duration. Only present if installed.
-* ``/proc``: live shells owned by you. Gives cwd even with no hook installed.
-
-Neither source is allowed to record a command that looks like it carries a
-secret: the hook filters them, and this module filters again on read.
+Two partial sources: the JSONL log the shell hook writes, and /proc for live
+shells. Command text is redacted on read, so a credential in the log doesn't
+reach the point.
 """
 from __future__ import annotations
 
@@ -39,11 +34,10 @@ def log_path() -> str:
 
 def capture_from_log(window_hours: float = 12.0, limit: int = 8,
                      redactions: Optional[List[str]] = None) -> List[TerminalRef]:
-    """Commands and last failures, newest first, with credentials removed.
+    """Commands and last failures, newest first, credentials stripped.
 
-    ``redactions`` is an out-parameter: when given a list, it gains one entry
-    describing what was taken out, so the point can say it withheld something
-    without saying what.
+    ``redactions`` is an out-parameter: pass a list and it gets one summary
+    entry, so the point can say it withheld something without saying what.
     """
     leaked = 0
     path = log_path()
@@ -71,7 +65,7 @@ def capture_from_log(window_hours: float = 12.0, limit: int = 8,
                 data = event.get("data") or {}
                 cwd = data.get("cwd") or ""
                 if not cwd:
-                    # Output events carry no cwd; resolve them through the command id.
+                    # output events have no cwd; look it up by cmd_id
                     cmd_id = str(data.get("cmd_id") or "")
                     cwd = cwd_by_cmd.get(cmd_id, "")
                     if not cwd:
@@ -129,7 +123,7 @@ def capture_live_shells(limit: int = 8) -> List[TerminalRef]:
             continue
         if len(refs) >= limit * 2:
             break
-    # De-duplicate by cwd, keeping the newest shell.
+    # one entry per cwd, newest shell wins
     seen = {}
     for ref in sorted(refs, key=lambda r: r.at or 0, reverse=True):
         seen.setdefault(ref.cwd, ref)

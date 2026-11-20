@@ -1,8 +1,8 @@
-"""Assembling a resume point from whatever providers are available.
+"""Builds one resume point from whatever this machine can tell us.
 
-The whole capture is budgeted: a resume point is meant to be a few kilobytes
-and to take well under a second. If a provider is slow or missing, the point
-is still written and the gap is recorded in ``provenance`` and warnings.
+Budgeted to a few KB and well under a second. A provider that is missing, slow
+or broken adds a warning and leaves a gap in provenance; the point is still
+written.
 """
 from __future__ import annotations
 
@@ -77,14 +77,14 @@ def capture(
     except Exception as exc:  # pragma: no cover - defensive
         collector.skip("terminals", str(exc))
 
-    # The repo root always leads: it is where a restore starts.
+    # repo root first, that is where a restore starts
     seen_paths = {f.path.rstrip("/") for f in files}
     if repo and os.path.isdir(repo.root):
         files = [f for f in files if f.path.rstrip("/") != repo.root.rstrip("/")]
         files.insert(0, FileRef(path=repo.root, kind="folder", reason="repo-root"))
         seen_paths.add(repo.root.rstrip("/"))
 
-    # Terminal roots belong in the working set: that is where you will resume.
+    # shell cwds belong in the working set too
     for term in terminals:
         key = (term.cwd or "").rstrip("/")
         if key and key not in seen_paths and os.path.isdir(term.cwd):

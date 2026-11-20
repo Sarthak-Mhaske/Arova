@@ -1,13 +1,7 @@
-"""Ask a vision model about one image, with your own key.
+"""Vision requests over urllib. No SDK, no proxy, no account.
 
-Zero dependencies: this speaks to the providers over ``urllib``. There is no
-SDK to install, no telemetry, no account, and no proxy. The only thing that
-leaves the machine is the image you explicitly passed in, and the question you
-explicitly typed.
-
-Every request is built in one place so the payloads are auditable in tests:
-``build_request`` returns ``(url, headers, body)`` and nothing else may invent
-a shape.
+build_request() is the only place payloads are shaped, so the tests can check
+each provider's request without touching the network.
 """
 from __future__ import annotations
 
@@ -22,9 +16,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from deskmark.look.errors import LookError
 
-# Default models, overridable with --model or env. These are deliberately a
-# small table rather than a registry: model names churn every few months, and a
-# stale registry that pretends to know is worse than one obvious default.
+# defaults, overridable with --model or DESKMARK_LOOK_MODEL. a short table on
+# purpose: model names churn every few months and a registry that pretends
+# otherwise just goes stale.
 PROVIDERS: Dict[str, Dict[str, Any]] = {
     "gemini": {
         "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],

@@ -65,7 +65,7 @@ Restore plan for "checkout-idempotency" (5 actions)
   ✦ hint     claude: claude --resume 8f2c1e4a-77b3-4c19-9f11-2b6d5a0c3e77
   recorded commands are shown above but never executed.
 
-dry run — nothing was opened. Re-run with --yes to restore.
+dry run, nothing was opened. Re-run with --yes to restore.
 ```
 
 ### Hand it to an agent

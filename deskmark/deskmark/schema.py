@@ -1,8 +1,7 @@
-"""The resume point format.
+"""The deskmark/v1 data model.
 
-Everything here is plain data. Serialisation is JSON and must round-trip
-exactly: a resume point written by one machine and read by another (or by an
-agent over MCP) has to mean the same thing.
+Dataclasses, JSON round-trip, digest. Field names are published in docs/spec.md
+and read by other implementations, so renaming one is a format change.
 """
 from __future__ import annotations
 
@@ -32,11 +31,10 @@ def _digest(payload: Any) -> str:
 
 @dataclass
 class Provenance:
-    """Where a piece of a resume point came from, and how much to trust it.
+    """Where a section came from, and how much to trust it.
 
-    Every section carries one of these. Nothing in a resume point is allowed to
-    pretend to be more certain than it is: the UI and the agent both read
-    ``confidence`` and ``ttl_seconds`` before acting on a claim.
+    Both the renderer and any agent reading the point look at confidence and
+    ttl_seconds, so a provider must not inflate them.
     """
 
     source: str                 # e.g. "git", "chrome-history", "shell-hook", "proc"
@@ -134,10 +132,10 @@ class TerminalRef:
 
 @dataclass
 class AgentRef:
-    """A coding agent that was running when the point was taken.
+    """An agent that was running when the point was taken.
 
-    ``resume_hint`` is the command a human can run to pick the session back up.
-    Deskmark records it and prints it; it never runs it for you.
+    resume_hint is the command to pick the session back up. We record it and
+    print it; running it is up to you.
     """
 
     kind: str                   # "claude" | "codex" | "cursor" | "opencode" | ...
@@ -193,7 +191,8 @@ class ResumePoint:
     redactions: List[str] = field(default_factory=list)
     digest: str = ""
 
-    # -- derived ---------------------------------------------------------
+    # --- derived ---
+
     def age_seconds(self, now: Optional[float] = None) -> float:
         return (now or _now()) - self.created_at
 
@@ -204,7 +203,8 @@ class ResumePoint:
     def file_count(self) -> int:
         return len(self.files)
 
-    # -- serialisation ---------------------------------------------------
+    # --- json ---
+
     def to_dict(self, with_digest: bool = True) -> Dict[str, Any]:
         data: Dict[str, Any] = {
             "schema": self.schema,

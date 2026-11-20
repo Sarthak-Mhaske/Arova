@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build a throwaway "developer machine" and run the resume point demo against it.
+# Fake a developer machine in /tmp and run save/packet/resume against it.
 #
 #   ./scripts/demo.sh            # save + show + dry-run restore
 #   ./scripts/demo.sh --clean    # remove the fixture afterwards
 #
-# Everything happens under /tmp/deskmark-demo and never touches your real HOME,
-# browser profile, or ~/.deskmark store.
+# Everything lands under /tmp/deskmark-demo. Your real HOME, browser profile
+# and ~/.deskmark are left alone.
 set -euo pipefail
 
 ROOT="${DESKMARK_DEMO_DIR:-/tmp/deskmark-demo}"
@@ -56,7 +56,7 @@ for i, (u, t) in enumerate([
 c.connection.commit()
 PY
 
-# a stand-in for a running agent, so the agent section is populated
+# fake `claude` process so the agent section has something in it
 printf '#!/bin/sh\nsleep 30\n' > "$ROOT/bin/claude"; chmod +x "$ROOT/bin/claude"
 setsid "$ROOT/bin/claude" >/dev/null 2>&1 < /dev/null &
 sleep 0.4

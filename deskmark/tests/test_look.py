@@ -11,9 +11,7 @@ from deskmark.look.screen import active_window
 from deskmark.look import understand
 
 
-# --------------------------------------------------------------------------
-# capture
-# --------------------------------------------------------------------------
+# --- capture ---
 
 def test_capture_says_what_to_install_when_nothing_works(monkeypatch):
     monkeypatch.setattr("sys.platform", "linux")
@@ -79,9 +77,7 @@ def test_available_tools_is_a_list_even_on_a_bare_machine(monkeypatch):
     assert available_tools() == []
 
 
-# --------------------------------------------------------------------------
-# active window
-# --------------------------------------------------------------------------
+# --- active window ---
 
 def test_active_window_reads_hyprctl_json(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/hyprctl" if name == "hyprctl" else None)
@@ -115,9 +111,7 @@ def test_active_window_explains_itself_when_nothing_is_available(monkeypatch):
     assert "hyprctl" in str(excinfo.value)
 
 
-# --------------------------------------------------------------------------
-# asking a model
-# --------------------------------------------------------------------------
+# --- asking a model ---
 
 def test_ask_without_a_key_names_the_variables(monkeypatch):
     for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):

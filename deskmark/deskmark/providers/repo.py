@@ -1,7 +1,6 @@
-"""Git ground truth.
+"""Git state: root, branch, head, dirty files, TODOs.
 
-The repo is the only part of a resume point that is objectively verifiable.
-Everything else is a hint; this is a fact.
+The only part of a point that can be checked against reality later.
 """
 from __future__ import annotations
 
@@ -89,11 +88,10 @@ def capture_repo(cwd: str) -> Optional[RepoState]:
 
 
 def working_set_files(repo: RepoState, limit: int = MAX_FILES) -> List[FileRef]:
-    """Files that were plausibly part of the working set, most specific first.
+    """Changed files first, tip-commit files as a fallback for a clean tree.
 
-    Changed files are the signal. Files from recent commits are only a
-    fallback for a clean tree, and are capped hard: a resume point that lists
-    every file in the repo is noise, not context.
+    Capped hard. A point that lists every file in the repo is noise, and the
+    cap is also what keeps capture under a second on a big checkout.
     """
     now = time.time()
     refs: List[FileRef] = []
@@ -116,8 +114,8 @@ def working_set_files(repo: RepoState, limit: int = MAX_FILES) -> List[FileRef]:
     for rel in repo.untracked:
         add(rel, "new")
 
-    # Only when nothing is in flight do we look at recent history, and only at
-    # the tip commit: it is a weaker signal and must not drown the real one.
+    # Last resort: the tip commit. Weaker than a branch or a failing command,
+    # so it only gets used when nothing else said anything.
     if not refs:
         code, names = run(["git", "show", "--name-only", "--pretty=format:"], cwd=repo.root)
         if code == 0:
@@ -130,11 +128,10 @@ def working_set_files(repo: RepoState, limit: int = MAX_FILES) -> List[FileRef]:
 
 
 def open_questions(repo: RepoState, limit: int = 3) -> List[str]:
-    """TODO/FIXME markers sitting in the files you were editing.
+    """TODO/FIXME markers in the working set.
 
-    These are the cheapest honest signal of "what was I about to do" that
-    exists on disk. We only scan the working set, and only the head of each
-    file, so this stays fast and never reads a large binary.
+    Only the head of each file, and only text-ish extensions, so a large binary
+    or a minified bundle can't stall capture.
     """
     found: List[str] = []
     candidates = list(dict.fromkeys(repo.dirty + repo.staged))
@@ -154,6 +151,6 @@ def open_questions(repo: RepoState, limit: int = 3) -> List[str]:
             if any(marker in stripped for marker in TODO_MARKERS):
                 text = stripped.lstrip("/#*- ").strip()
                 if text and len(text) < 180:
-                    found.append(f"{rel}:{line_no} — {text}")
+                    found.append(f"{rel}:{line_no}: {text}")
                 break
     return found

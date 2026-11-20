@@ -1,15 +1,7 @@
-"""MCP server: resume points as a first-class primitive for any agent.
+"""stdio MCP server: five tools and one resource.
 
-This is the distribution loop. A human installs Deskmark once; then Claude Code,
-Cursor, Codex, OpenClaw, or anything else that speaks MCP can:
-
-* read the latest resume point before starting work,
-* save a resume point before its context window fills,
-* ask what the restore plan would be without touching the desktop.
-
-Dual-era on purpose: it answers the 2026-07-28 stateless ``server/discover``
-call and the legacy ``initialize`` handshake, so it works with clients from
-both eras. Only stderr is used for logging — stdout belongs to the protocol.
+Handles both protocol eras (the initialize handshake and server/discover).
+stdout belongs to the protocol, so all logging goes to stderr.
 """
 from __future__ import annotations
 
@@ -237,9 +229,9 @@ def handle(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         uri = str(params.get("uri") or "")
         prefix = "deskmark://resume/"
         if uri.startswith(prefix):
-            # A client can ask for anything, including "../../etc/passwd".
-            # Anything that is not an id we hold is an invalid parameter, not
-            # an internal error and never a filesystem path.
+            # a client can ask for anything, "../../etc/passwd" included.
+            # whatever we can't resolve is a bad parameter, not an internal
+            # error, and never a path.
             try:
                 point = store.load(uri[len(prefix):])
             except DeskmarkError as exc:

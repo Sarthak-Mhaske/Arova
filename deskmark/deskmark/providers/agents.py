@@ -1,12 +1,7 @@
 """Coding agents that were running when the point was taken.
 
-In 2026 a working session is rarely just you: it is you plus two or three
-agents in different terminals. Those agents hold state that no file records —
-the conversation. This provider finds them and, where the agent exposes a
-session file on disk, records the id needed to resume the conversation.
-
-Deskmark never talks to the agent's API and never reads the conversation. It
-records only: which agent, where, and which session to continue.
+We record which agent, where it ran, and the session id needed to continue. We
+never call the agent's API and never read the conversation.
 """
 from __future__ import annotations
 
@@ -28,7 +23,7 @@ AGENT_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("amp", re.compile(r"\bamp\b")),
 ]
 
-# Flags that carry a session identifier the agent can be resumed with.
+# flags that carry a session id, so we can print a resume command later
 SESSION_FLAGS = ("--resume", "-r", "--session", "--session-id", "--continue", "-c")
 
 
@@ -43,7 +38,7 @@ def _cmdline(pid: str) -> str:
 
 def _classify(cmdline: str) -> Optional[str]:
     lowered = cmdline.lower()
-    # Do not mistake our own process, a grep, or a shell for an agent.
+    # don't count our own process, a grep, or a plain shell as an agent
     if not cmdline or "deskmark" in lowered and "resume" in lowered:
         return None
     if any(token in lowered for token in ("grep", " rg ", "ps aux", "less ", "vim ", "nvim ")):
@@ -107,6 +102,8 @@ def _resume_hint(kind: str, session_id: str, cwd: str) -> str:
 
 
 def capture_agents(limit: int = 6) -> List[AgentRef]:
+    # linux only for now: /proc is the whole implementation. macos and windows
+    # get no agent section rather than a wrong one.
     if not os.path.isdir("/proc"):
         return []
 
@@ -128,8 +125,8 @@ def capture_agents(limit: int = 6) -> List[AgentRef]:
         except OSError:
             cwd = ""
 
-        # A process whose working directory has been deleted cannot be resumed
-        # anywhere. /proc reports it as "/path (deleted)", which is not a path.
+        # /proc reports a deleted cwd as "/path (deleted)". There is nothing to
+        # resume there, so skip it instead of offering a broken hint.
         if cwd.endswith(" (deleted)"):
             continue
 

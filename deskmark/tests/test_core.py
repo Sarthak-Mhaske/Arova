@@ -41,9 +41,7 @@ from deskmark.schema import (
 )
 
 
-# --------------------------------------------------------------------------
-# fixtures
-# --------------------------------------------------------------------------
+# --- fixtures ---
 
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
@@ -98,9 +96,7 @@ def chrome_db(home, rows):
     return db
 
 
-# --------------------------------------------------------------------------
-# format
-# --------------------------------------------------------------------------
+# --- format ---
 
 def test_roundtrip_is_lossless_and_verifiable():
     point = ResumePoint(
@@ -130,9 +126,7 @@ def test_foreign_schema_is_refused():
         ResumePoint.from_dict({"schema": "other/v1", "version": 1, "name": "x"})
 
 
-# --------------------------------------------------------------------------
-# privacy
-# --------------------------------------------------------------------------
+# --- privacy ---
 
 @pytest.mark.parametrize("url,title", [
     ("https://chase.com/payments", "Transfer funds"),
@@ -168,7 +162,7 @@ def test_history_reader_records_what_it_withheld(home):
     assert any("github.com" in u for u in urls)
     assert not any("chase.com" in u or "mail.google.com" in u for u in urls)
     assert redactions and all("×" in r for r in redactions)
-    # tracking params and badge counters are cleaned
+    # tracking params and badge counters get stripped
     assert not any("utm_" in u for u in urls)
     assert not any(t.title.startswith("(3)") for t in tabs)
 
@@ -178,9 +172,7 @@ def test_history_reader_reports_absence_instead_of_pretending(home):
     assert tabs is None and profiles == 0 and redactions == []
 
 
-# --------------------------------------------------------------------------
-# capture
-# --------------------------------------------------------------------------
+# --- capture ---
 
 def test_repo_capture_reads_facts_from_git(repo):
     state = capture_repo(str(repo))
@@ -225,8 +217,8 @@ def test_shell_log_yields_last_command_and_failure(home):
     refs = capture_from_log(window_hours=1, redactions=redactions)
     assert len(refs) == 1
     ref = refs[0]
-    # A command that carried a credential is kept with the secret taken out.
-    # Dropping it would hide the work as well as the secret.
+    # credential cut out, command kept. dropping the line would lose the work
+    # as well as the secret.
     assert ref.last_command == "export API_KEY=[redacted]"
     assert redactions == ["command text ×1"]
     assert ref.last_failure == "pytest tests -k retry"
@@ -245,9 +237,7 @@ def test_capture_writes_a_point_small_enough_to_be_portable(repo, home):
     assert result.point.intent.next_source == "todo"
 
 
-# --------------------------------------------------------------------------
-# intent
-# --------------------------------------------------------------------------
+# --- intent ---
 
 def test_user_intent_always_wins():
     repo = RepoState(root="/x", name="x", branch="feat/thing", dirty=["a.py"])
@@ -270,9 +260,7 @@ def test_failure_without_todo_becomes_the_next_step():
     assert intent.next_source == "terminal-exit"
 
 
-# --------------------------------------------------------------------------
-# restore
-# --------------------------------------------------------------------------
+# --- restore ---
 
 def test_restore_plan_never_carries_an_executable_command(repo, home):
     log = home / ".deskmark" / "session_log.jsonl"   # DESKMARK_HOME wins; see terminal.log_path
@@ -291,7 +279,7 @@ def test_restore_plan_never_carries_an_executable_command(repo, home):
         assert "rm -rf" not in (action.detail or "")
         assert "rm -rf" not in action.target
 
-    # dry run by default: nothing is launched, and every launchable action says so
+    # dry run is the default, so nothing here should have been launched
     outcomes = apply_plan(plan, dry_run=True)
     assert all(o["status"] in {"would-run", "missing", "hint"} for o in outcomes)
 
@@ -305,9 +293,7 @@ def test_restore_plan_flags_a_different_host_and_staleness():
     assert any("old" in w for w in plan.warnings)
 
 
-# --------------------------------------------------------------------------
-# store
-# --------------------------------------------------------------------------
+# --- store ---
 
 def test_store_roundtrip_list_and_gc(home):
     for index in range(3):
@@ -333,9 +319,7 @@ def test_store_missing_ref_raises(home):
         store.load("nope")
 
 
-# --------------------------------------------------------------------------
-# packet
-# --------------------------------------------------------------------------
+# --- packet ---
 
 def test_packet_stays_within_budget_and_keeps_the_important_parts(repo, home):
     result = capture(name="big", cwd=str(repo), browser=False, agents=False)
@@ -365,9 +349,7 @@ def test_packet_json_is_machine_readable(repo, home):
     assert "provenance" in payload
 
 
-# --------------------------------------------------------------------------
-# agents
-# --------------------------------------------------------------------------
+# --- agents ---
 
 @pytest.mark.parametrize("cmdline,expected", [
     ("node /usr/local/bin/claude --resume abc123", "claude"),
@@ -380,9 +362,7 @@ def test_agent_process_classification(cmdline, expected):
     assert classify_agent(cmdline) == expected
 
 
-# --------------------------------------------------------------------------
-# MCP
-# --------------------------------------------------------------------------
+# --- mcp ---
 
 def test_mcp_speaks_both_protocol_eras(home):
     from deskmark.mcp import handle
@@ -433,9 +413,8 @@ def test_cli_entrypoint_smoke(repo, home):
     assert main(["resume"]) == 0                      # dry run prints a plan
 
 
-# --------------------------------------------------------------------------
-# store robustness — every one of these was a real crash before
-# --------------------------------------------------------------------------
+# --- store robustness ---
+# every case below crashed, or silently loaded wrong, at some point.
 
 def test_corrupt_point_file_raises_a_clean_error(home):
     from deskmark.errors import CorruptPointError, DeskmarkError
@@ -654,7 +633,7 @@ def test_redaction_removes_credentials_from_command_text(command, forbidden):
     safe, hits = redact_command(command)
     assert hits >= 1, command
     assert forbidden not in safe
-    # the shape of the command survives, so the point still says what you ran
+    # the command itself survives, otherwise the point stops saying what you ran
     assert safe.split(" ")[0] in command.split(" ")[0]
 
 
@@ -687,7 +666,7 @@ def test_a_point_edited_after_it_was_saved_is_refused(home):
         store.load(point.id)
     assert "changed after it was saved" in str(excinfo.value)
 
-    # a listing skips it instead of dying on it, and does not become it
+    # and a listing skips it rather than dying on it
     assert all(entry["id"] != point.id for entry in store.list_points())
 
 
@@ -741,7 +720,7 @@ def test_an_id_prefix_resolves_and_an_ambiguous_one_refuses_to_guess(home):
         store.load("ab")
     message = str(excinfo.value)
     assert "matches 2 resume points" in message
-    # the hint names both candidates, or the error is not actionable
+    # the hint has to name both, or you can't act on the error
     assert "ab1111c0ffee" in message and "ab2222deadbb" in message
 
 

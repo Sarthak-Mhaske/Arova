@@ -1,18 +1,10 @@
-"""Local store for resume points.
+"""Point files on disk, and an index that can be rebuilt from them.
 
-One JSON file per point, plus a small index. No database, no daemon, no
-background process: a resume point is a file. That means you can copy it,
-commit it, diff it, mail it, or delete it with ``rm``, and nothing else in the
-system has to know.
+One JSON file per point. The index beside it is a cache: missing, stale or
+corrupt only costs a rebuild, because a point you saved shouldn't vanish
+because a cache file broke.
 
-Stability rules enforced here:
-
-* every failure is raised as a :class:`~deskmark.errors.DeskmarkError` with a
-  hint, never as a bare ``OSError`` or ``JSONDecodeError``;
-* the index is a *cache*, never the source of truth — if it is corrupt, stale,
-  or missing, the store rebuilds it from the files on disk;
-* an ambiguous reference is refused rather than guessed, because the cost of
-  restoring the wrong point is higher than the cost of asking again.
+Anything that fails in here raises DeskmarkError with a hint, not a bare OSError.
 """
 from __future__ import annotations
 
@@ -56,9 +48,7 @@ def index_path() -> str:
     return path
 
 
-# ---------------------------------------------------------------------------
-# low level
-# ---------------------------------------------------------------------------
+# --- io helpers ---
 
 def _atomic_write(path: str, text: str) -> None:
     directory = os.path.dirname(path)
@@ -107,13 +97,12 @@ def _read_json(path: str) -> Any:
 
 
 def _load_file(path: str) -> ResumePoint:
-    """Parse one point and check it is still the point that was written.
+    """Parse one point and check it hasn't been touched since it was written.
 
-    A point carries a digest over its own contents. Verifying it on every read
-    is the only thing that makes the digest worth having: without this, a point
-    edited by hand — or truncated by a full disk — is displayed as if it were
-    the truth. Points written without a digest are accepted, because a file can
-    legitimately arrive from elsewhere.
+    We compute a digest over the contents and verify it on read. For a while
+    this was computed and never checked, which made it decoration: a hand-edited
+    point loaded as if it were real. Points with no digest at all are accepted,
+    since a file can legitimately arrive from somewhere else.
     """
     data = _read_json(path)
     try:
@@ -152,7 +141,7 @@ def _read_index() -> List[Dict[str, Any]]:
     except PointNotFound:
         return []
     except StoreError:
-        # A damaged index is a cache miss, not a failure: rebuild from disk.
+        # damaged index = cache miss. rebuild from disk.
         return []
     if not isinstance(data, list):
         return []
@@ -183,9 +172,7 @@ def _summary(point: ResumePoint, path: str) -> Dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# public API
-# ---------------------------------------------------------------------------
+# --- public api ---
 
 def save(point: ResumePoint) -> str:
     """Persist a point and update the index. Returns the file path."""
@@ -199,17 +186,16 @@ def save(point: ResumePoint) -> str:
     try:
         _write_index(entries)
     except StoreError:
-        # The point itself is written; a broken index only costs a slow lookup.
+        # point is already on disk; a broken index only makes the next read slow.
         pass
     return path
 
 
 def load(ref: str, allow_path: bool = False) -> ResumePoint:
-    """Load by id, by name, by unique name prefix, or (opt-in) by file path.
+    """Load by id, by name, by unique prefix, or (opt-in) by file path.
 
-    ``allow_path`` exists for the CLI's ``--file`` escape hatch. It must stay
-    off for anything reachable over HTTP or MCP: a reference from an untrusted
-    caller is not a filesystem path.
+    allow_path is for the CLI only. Keep it off for MCP and anything else that
+    takes a reference from outside: a ref from a stranger is not a path.
     """
     if not ref or not str(ref).strip():
         raise PointNotFound(
@@ -281,7 +267,7 @@ def _picker(entries: List[Dict[str, Any]], show: int = 4) -> str:
     """Turn ambiguous candidates into something the caller can act on."""
     bits = [f"{e.get('id')} ({e.get('name', '?')})" for e in entries[:show]]
     more = "" if len(entries) <= show else f" and {len(entries) - show} more"
-    return "be more specific: " + ", ".join(bits) + more + "  —  `deskmark list` shows all"
+    return "be more specific: " + ", ".join(bits) + more + ". `deskmark list` shows all"
 
 
 def _rebuild_index() -> List[Dict[str, Any]]:
@@ -315,8 +301,8 @@ def list_points(include_stale: bool = True, repair: bool = True) -> List[Dict[st
         if path != on_disk[entry["id"]]:
             entry["path"] = on_disk[entry["id"]]
             changed = True
-        # A point on disk is only listed if it actually parses. Listing a
-        # damaged point would send the caller to `load`, which would raise.
+        # only list a point that parses. listing a damaged one sends the caller
+        # to load(), which then errors on something list() just showed them.
         try:
             point = _load_file(entry["path"])
         except CorruptPointError:
@@ -324,7 +310,7 @@ def list_points(include_stale: bool = True, repair: bool = True) -> List[Dict[st
             continue
         healthy.append(_summary(point, entry["path"]))
 
-    # Files that exist but are not indexed (index lost, or a point copied in).
+    # files the index doesn't know about: index lost, or a point copied in
     indexed = {entry["id"] for entry in healthy}
     for point_id, path in on_disk.items():
         if point_id in indexed:
