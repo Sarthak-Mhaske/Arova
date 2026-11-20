@@ -1,10 +1,37 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build
 build/
 dist/
-.venv/
-.pytest_cache/
-.uv/
-*.png
-!docs/*.png
+*.tar.gz
+*.zip
+uv.lock
+
+# Demo output
+docs/*.gif
+*.cast
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets
+.env
+*.key
+*.secret

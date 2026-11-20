@@ -53,12 +53,28 @@ git add . && git commit -m "deskmark 0.3.0"
 gh repo create deskmark --private --source . --push   # or --public, your call
 ```
 
-Then replace the `<your-username>` placeholder in `pyproject.toml` (2 URLs),
-`README.md` (1 badge + 1 releases link) and `CHANGELOG.md` (1 link):
+Then replace the `<your-username>` placeholder — 13 hits in 8 files, all
+cosmetic (badge links in the README point at `../../releases`, which needs no
+username at all):
 
 ```bash
-grep -rn "<your-username>" .        # 4 hits, all cosmetic
+grep -rn "<your-username>" .        # pyproject (3), README (2), AUR (3), rest (5)
 ```
+
+## Presentation
+
+The README follows the house style of `Sarthak-Mhaske/HyprVoice`: centred hero
+with badge row and anchor nav, "Also known as", Overview, Demo with real console
+transcripts, an ASCII pipeline, a status callout, features tables, Requirements +
+Dependencies, Quick Install with a collapsible Manual Setup, Available Commands
+by category, Configuration tables, Architecture, Platform support, collapsible
+Troubleshooting, a Roadmap with checkboxes and a kill criterion, Provider
+Support, File Structure, Documentation index, Contributing with commit format,
+Acknowledgments, License.
+
+There are no GIFs yet: the demo section uses the real output of
+`./scripts/demo.sh`, and `docs/demo.tape` is the VHS script that renders them once
+someone records.
 
 ## Verified before handover
 
