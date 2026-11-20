@@ -58,7 +58,7 @@ It is plain JSON. Nothing here requires Deskmark to read it.
     "repo": {"source": "git", "method": "rev-parse + status --porcelain + log",
              "confidence": 1.0, "captured_at": 1784723201.5, "ttl_seconds": 3600}
   },
-  "redactions": ["sensitive host chase.com ×1"],
+  "redactions": ["withheld: banking ×1", "command text ×2"],
   "digest": "9f2c1e4a77b34c19"
 }
 ```
@@ -103,7 +103,10 @@ Dropped: banking and payments, identity providers and sign-in flows, health, tax
 government, webmail, social and chat, local Deskmark/dev UI, blank pages.
 
 Every drop is counted and summarised in `redactions`, so the human can see that
-something was withheld rather than assuming the tool saw everything.
+something was withheld rather than assuming the tool saw everything. A summary
+entry names a **category**, never the host or the URL it withheld: "withheld:
+banking ×2" is the point, and repeating the hostname would give away exactly
+what the drop was protecting.
 
 ## Versioning
 

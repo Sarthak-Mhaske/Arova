@@ -18,6 +18,7 @@ import time
 from typing import Dict, List, Optional
 
 from deskmark.schema import TerminalRef
+from .privacy import redact_command
 
 SECRET_PATTERNS = re.compile(
     r"(password|passwd|secret|token|api[_-]?key|auth[_-]?key|bearer|private[_-]?key)"
@@ -36,11 +37,15 @@ def log_path() -> str:
     return os.path.join(base, "deskmark", "session_log.jsonl")
 
 
-def _looks_secret(command: str) -> bool:
-    return bool(SECRET_PATTERNS.search(command or ""))
+def capture_from_log(window_hours: float = 12.0, limit: int = 8,
+                     redactions: Optional[List[str]] = None) -> List[TerminalRef]:
+    """Commands and last failures, newest first, with credentials removed.
 
-
-def capture_from_log(window_hours: float = 12.0, limit: int = 8) -> List[TerminalRef]:
+    ``redactions`` is an out-parameter: when given a list, it gains one entry
+    describing what was taken out, so the point can say it withheld something
+    without saying what.
+    """
+    leaked = 0
     path = log_path()
     if not os.path.exists(path):
         return []
@@ -73,7 +78,9 @@ def capture_from_log(window_hours: float = 12.0, limit: int = 8) -> List[Termina
                         continue
                 command = data.get("command") or ""
                 ref = by_cwd.get(cwd) or TerminalRef(cwd=cwd)
-                if command and not _looks_secret(command):
+                if command:
+                    command, hits = redact_command(command)
+                    leaked += hits
                     ref.last_command = command[:300]
                     ref.at = ts or time.time()
                 if data.get("cmd_id"):
@@ -89,6 +96,9 @@ def capture_from_log(window_hours: float = 12.0, limit: int = 8) -> List[Termina
                 by_cwd[cwd] = ref
     except OSError:
         return []
+
+    if leaked and redactions is not None:
+        redactions.append(f"command text ×{leaked}")
 
     refs = sorted(by_cwd.values(), key=lambda r: r.at, reverse=True)
     return refs[:limit]

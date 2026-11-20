@@ -18,7 +18,7 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 class Verdict(str, Enum):
@@ -26,27 +26,51 @@ class Verdict(str, Enum):
     DROP = "drop"
 
 
-# Hosts that must never appear in a resume point, matched against the exact
-# registrable domain or one of its subdomains.
-BLOCKED_DOMAINS: Tuple[str, ...] = (
-    # banking & payments
-    "chase.com", "wellsfargo.com", "bankofamerica.com", "citibank.com", "hsbc.com",
-    "icicibank.com", "hdfcbank.com", "sbi.co.in", "axisbank.com", "kotak.com",
-    "paypal.com", "stripe.com/dashboard", "razorpay.com", "checkout.stripe.com",
-    "zerodha.com", "groww.in", "upstox.com", "coinbase.com", "binance.com",
-    # identity & auth
-    "accounts.google.com", "login.microsoftonline.com", "login.live.com",
-    "appleid.apple.com", "okta.com", "auth0.com", "onelogin.com", "duo.com",
-    # health, tax, government
-    "incometax.gov.in", "irs.gov", "aadhaar", "passportindia.gov.in",
-    "mychart.com", "practo.com", "1mg.com",
-    # webmail: high volume, low resumption value
-    "mail.google.com", "outlook.live.com", "outlook.office.com", "mail.yahoo.com",
-    # social & chat: ephemeral, and other people's words
-    "instagram.com", "tiktok.com", "facebook.com", "x.com", "twitter.com",
-    "pinterest.com", "web.whatsapp.com", "messenger.com", "chat.google.com",
-    "discord.com",
-)
+# Hosts that must never appear in a resume point, grouped by why. Matched
+# against the registrable domain or one of its subdomains. A rule may carry a
+# path prefix ("stripe.com/dashboard").
+#
+# The group name is what gets written into the point. The host is not: "you were
+# on a banking site" is a fact worth hiding, and printing the hostname in the
+# summary would leak exactly what the drop was protecting.
+BLOCKED_DOMAINS: Dict[str, Tuple[str, ...]] = {
+    "banking": (
+        "chase.com", "wellsfargo.com", "bankofamerica.com", "citibank.com", "hsbc.com",
+        "icicibank.com", "hdfcbank.com", "sbi.co.in", "axisbank.com", "kotak.com",
+        "paypal.com", "stripe.com/dashboard", "checkout.stripe.com", "razorpay.com",
+        "adyen.com", "wise.com",
+    ),
+    "trading": (
+        "zerodha.com", "groww.in", "upstox.com", "coinbase.com", "binance.com",
+        "kite.zerodha.com", "interactivebrokers.com", "schwab.com", "fidelity.com",
+    ),
+    "identity": (
+        "accounts.google.com", "login.microsoftonline.com", "login.live.com",
+        "appleid.apple.com", "okta.com", "auth0.com", "onelogin.com", "duo.com",
+        "lastpass.com", "1password.com", "bitwarden.com", "dashlane.com",
+        "keepersecurity.com", "nordpass.com", "proton.me/pass",
+    ),
+    "tax-and-government": (
+        "incometax.gov.in", "irs.gov", "passportindia.gov.in", "gov.uk",
+        "uidai.gov.in", "mychart.com",
+    ),
+    "health": (
+        "practo.com", "1mg.com", "pharmeasy.in", "apollopharmacy.in", "netmeds.com",
+        "cvs.com", "walgreens.com",
+    ),
+    "webmail": (
+        "mail.google.com", "outlook.live.com", "outlook.office.com", "mail.yahoo.com",
+        "protonmail.com", "mail.proton.me", "fastmail.com", "zoho.com/mail",
+    ),
+    "calendar": (
+        "calendar.google.com", "calendly.com", "cal.com",
+    ),
+    "social": (
+        "instagram.com", "tiktok.com", "facebook.com", "x.com", "twitter.com",
+        "pinterest.com", "web.whatsapp.com", "messenger.com", "chat.google.com",
+        "discord.com", "reddit.com/chat",
+    ),
+}
 
 # Path/query fragments that indicate a sensitive session regardless of host.
 BLOCKED_FRAGMENTS: Tuple[str, ...] = (
@@ -56,8 +80,11 @@ BLOCKED_FRAGMENTS: Tuple[str, ...] = (
 )
 
 # Host labels that are sensitive by convention, wherever they appear.
-SENSITIVE_LABELS: Tuple[str, ...] = ("bank", "banking", "wallet", "brokerage",
-                                     "invest", "payments", "netbanking")
+SENSITIVE_LABELS: Tuple[str, ...] = (
+    "bank", "banking", "wallet", "brokerage", "invest", "payments", "netbanking",
+    "health", "medical", "clinic", "hospital", "patient", "pharmacy", "insurance",
+    "vault", "keychain", "keyring",
+)
 
 # Local development bridges: our own UI, never useful to restore.
 LOCAL_NOISE_PORTS = ("8765", "5173", "1420", "3030")
@@ -102,28 +129,38 @@ def classify(url: str, title: str = "") -> Decision:
     if not host:
         return Decision(Verdict.DROP, "no host")
 
-    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        if any(f":{port}" in url for port in LOCAL_NOISE_PORTS):
-            return Decision(Verdict.DROP, "local deskmark/dev ui")
-        return Decision(Verdict.KEEP)
+    local = host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+    if local and any(f":{port}" in url for port in LOCAL_NOISE_PORTS):
+        return Decision(Verdict.DROP, "withheld: local dev server")
 
-    for rule in BLOCKED_DOMAINS:
-        if "/" in rule:
-            rule_host, rule_path = rule.split("/", 1)
-            if _domain_matches(host, rule_host) and path.startswith("/" + rule_path):
-                return Decision(Verdict.DROP, f"sensitive host {rule}")
-        elif _domain_matches(host, rule):
-            return Decision(Verdict.DROP, f"sensitive host {host}")
+    for category, rules in BLOCKED_DOMAINS.items():
+        for rule in rules:
+            if "/" in rule:
+                rule_host, rule_path = rule.split("/", 1)
+                if _domain_matches(host, rule_host) and path.startswith("/" + rule_path):
+                    return Decision(Verdict.DROP, f"withheld: {category}")
+            elif _domain_matches(host, rule):
+                return Decision(Verdict.DROP, f"withheld: {category}")
 
-    labels = set(host.split("."))
+    # A label the domain carries anywhere, not just as a whole word:
+    # "my.healthprovider.com" has no "health" label, and it is exactly the kind
+    # of host this rule exists for. The bias is deliberate — over-dropping costs
+    # a research tab, under-dropping leaks a medical record.
+    host_labels = host.split(".")
     for label in SENSITIVE_LABELS:
-        if label in labels:
-            return Decision(Verdict.DROP, f"sensitive host label {label}")
+        if any(label in part for part in host_labels):
+            return Decision(Verdict.DROP, "withheld: sensitive host name")
 
     haystack = path + "?" + query
     for fragment in BLOCKED_FRAGMENTS:
         if fragment in haystack:
-            return Decision(Verdict.DROP, f"sensitive path ({fragment.strip('/')})")
+            return Decision(Verdict.DROP, f"withheld: auth or payment path ({fragment.strip('/')})")
+
+    # An admin console on someone else's machine is not a page you resume; on
+    # localhost it usually is (a dev server you are working on).
+    if not local and (path.startswith("/admin") or path.startswith("/wp-admin")
+                      or path.startswith("/manage")):
+        return Decision(Verdict.DROP, "withheld: admin console")
 
     lowered_title = (title or "").strip().lower()
     if lowered_title in BORING_TITLES:
@@ -171,6 +208,52 @@ def categorize(url: str, title: str = "") -> str:
                                    "tutorial", "spec")):
         return "research"
     return "general"
+
+
+REDACTED = "[redacted]"
+
+# Order matters: the keyword rule runs before the token-shape rule so that
+# ``--password=sk-live-123`` becomes ``--password=[redacted]`` and not a
+# half-redacted string. Every rule is anchored on a shape, never on a word
+# appearing somewhere in a sentence.
+_SECRET_RULES = (
+    # key = value, key: value, --key=value, "key": "value"
+    (re.compile(
+        r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|auth[_-]?key"
+        r"|access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)\b"
+        r"(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1\2" + REDACTED),
+    # long flags with a space: --password hunter2, --token abc.
+    # Short flags are deliberately not inferred: `-p` is a port, a print, or a
+    # password depending on the program, and guessing would delete real context.
+    (re.compile(
+        r"(?i)(--(?:password|passwd|token|api-key|apikey|secret|auth-token"
+        r"|access-token|client-secret)\s+)(\S+)"), r"\1" + REDACTED),
+    # Authorization: Bearer <token>
+    (re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._\-]{6,})"), r"\1" + REDACTED),
+    # scheme://user:password@host  — the case a keyword rule cannot see
+    (re.compile(r"(\b[a-z][a-z0-9+.\-]*://[^/\s:@]+):([^/\s@]+)@"), r"\1:" + REDACTED + "@"),
+    # well-known token shapes, with no keyword in front of them
+    (re.compile(
+        r"\b(sk-[A-Za-z0-9_\-]{8,}|ghp_[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{8,}"
+        r"|github_pat_[A-Za-z0-9_]{8,}|glpat-[A-Za-z0-9_\-]{8,}|npm_[A-Za-z0-9]{8,}"
+        r"|xox[baprs]-[A-Za-z0-9\-]{6,}|AIza[0-9A-Za-z_\-]{10,}"
+        r"|AKIA[0-9A-Z]{12,}|ASIA[0-9A-Z]{12,})"), REDACTED),
+)
+
+
+def redact_command(command: str) -> Tuple[str, int]:
+    """Return (safe text, number of redactions). Never raises, never guesses.
+
+    A command is not dropped for looking secret: the last failing command is the
+    most useful line in a resume point, so it is kept with the credential taken
+    out. Dropping it hides both the secret and the work.
+    """
+    text = command or ""
+    total = 0
+    for pattern, replacement in _SECRET_RULES:
+        text, count = pattern.subn(replacement, text)
+        total += count
+    return text, total
 
 
 def redaction_summary(dropped: List[str]) -> List[str]:

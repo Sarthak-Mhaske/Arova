@@ -31,7 +31,7 @@ format — it is versioned and other implementations will read it.
 ## Commands you will need
 
 ```bash
-python -m pip install -e . && python -m pytest -q    # 67 tests, ~0.5s
+python -m pip install -e . && python -m pytest -q    # 91 tests, ~0.5s
 python -m compileall -q deskmark                     # syntax across all modules
 python -m build                                      # wheel + sdist in dist/
 ./scripts/demo.sh                                    # throwaway desk in /tmp

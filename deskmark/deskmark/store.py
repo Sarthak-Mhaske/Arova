@@ -7,7 +7,7 @@ system has to know.
 
 Stability rules enforced here:
 
-* every failure is raised as a :class:`~deskmark.errors.ResumeError` with a
+* every failure is raised as a :class:`~deskmark.errors.DeskmarkError` with a
   hint, never as a bare ``OSError`` or ``JSONDecodeError``;
 * the index is a *cache*, never the source of truth — if it is corrupt, stale,
   or missing, the store rebuilds it from the files on disk;
@@ -23,7 +23,8 @@ import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from deskmark.errors import CorruptPointError, PointNotFound, StoreError
+from deskmark.errors import (AmbiguousReference, CorruptPointError, PointNotFound,
+                             StoreError)
 from deskmark.schema import ResumePoint
 
 ID_PATTERN = re.compile(r"^[0-9a-f]{8,32}$")
@@ -91,6 +92,11 @@ def _read_json(path: str) -> Any:
             return json.load(handle)
     except FileNotFoundError as exc:
         raise PointNotFound(f"no resume point file at {path}") from exc
+    except UnicodeDecodeError as exc:
+        raise CorruptPointError(
+            f"{path} is not UTF-8 text (byte {exc.start} of {exc.end})",
+            hint=f"delete it with `rm {path}`; a point is always UTF-8 JSON",
+        ) from exc
     except json.JSONDecodeError as exc:
         raise CorruptPointError(
             f"{path} is not valid JSON (line {exc.lineno}, column {exc.colno})",
@@ -101,14 +107,29 @@ def _read_json(path: str) -> Any:
 
 
 def _load_file(path: str) -> ResumePoint:
+    """Parse one point and check it is still the point that was written.
+
+    A point carries a digest over its own contents. Verifying it on every read
+    is the only thing that makes the digest worth having: without this, a point
+    edited by hand — or truncated by a full disk — is displayed as if it were
+    the truth. Points written without a digest are accepted, because a file can
+    legitimately arrive from elsewhere.
+    """
     data = _read_json(path)
     try:
-        return ResumePoint.from_dict(data)
+        point = ResumePoint.from_dict(data)
     except (ValueError, TypeError, KeyError) as exc:
         raise CorruptPointError(
             f"{path} is not a valid resume point: {exc}",
             hint=f"delete it with `rm {path}` if it is stale or damaged",
         ) from exc
+    if point.digest and not point.verify():
+        raise CorruptPointError(
+            f"{path} changed after it was saved (digest mismatch)",
+            hint=(f"the file was edited or truncated; `deskmark list` skips it. "
+                  f"Delete it with `rm {path}` to forget it"),
+        )
+    return point
 
 
 def _point_files() -> Dict[str, str]:
@@ -213,19 +234,40 @@ def load(ref: str, allow_path: bool = False) -> ResumePoint:
     if not entries:
         entries = _rebuild_index()
 
+    def candidates(pattern: str) -> List[Dict[str, Any]]:
+        """Points whose id or name starts with ``pattern``, deduplicated by id."""
+        seen: Dict[str, Dict[str, Any]] = {}
+        for entry in entries:
+            if (str(entry.get("id", "")).startswith(pattern)
+                    or str(entry.get("name", "")).startswith(pattern)):
+                seen.setdefault(str(entry.get("id")), entry)
+        return sorted(seen.values(), key=lambda e: e.get("created_at", 0), reverse=True)
+
     exact = [e for e in entries if e.get("name") == ref]
-    matches = exact
-    if not matches and len(ref) >= MIN_PREFIX:
-        matches = [e for e in entries if str(e.get("name", "")).startswith(ref)]
+    if len(exact) == 1:
+        matches = exact
+    elif len(exact) > 1:
+        raise AmbiguousReference(
+            f"{len(exact)} resume points are named {ref!r}",
+            hint=_picker(exact),
+        )
+    elif len(ref) >= MIN_PREFIX:
+        matches = candidates(ref)
+        if len(matches) > 1:
+            raise AmbiguousReference(
+                f"{ref!r} matches {len(matches)} resume points",
+                hint=_picker(matches),
+            )
+    else:
+        matches = []
 
     if not matches:
         raise PointNotFound(
             f"no resume point matching {ref!r}",
             hint="`deskmark list` shows the names and ids that exist",
         )
-
-    newest = max(matches, key=lambda e: e.get("created_at", 0))
-    path = newest.get("path") or os.path.join(points_dir(), f"{newest['id']}.json")
+    chosen = matches[0]
+    path = chosen.get("path") or os.path.join(points_dir(), f"{chosen['id']}.json")
     if not os.path.exists(path):
         _rebuild_index()
         raise PointNotFound(
@@ -233,6 +275,13 @@ def load(ref: str, allow_path: bool = False) -> ResumePoint:
             hint="the index has been rebuilt; run `deskmark list` again",
         )
     return _load_file(path)
+
+
+def _picker(entries: List[Dict[str, Any]], show: int = 4) -> str:
+    """Turn ambiguous candidates into something the caller can act on."""
+    bits = [f"{e.get('id')} ({e.get('name', '?')})" for e in entries[:show]]
+    more = "" if len(entries) <= show else f" and {len(entries) - show} more"
+    return "be more specific: " + ", ".join(bits) + more + "  —  `deskmark list` shows all"
 
 
 def _rebuild_index() -> List[Dict[str, Any]]:

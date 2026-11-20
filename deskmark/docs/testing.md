@@ -2,7 +2,7 @@
 
 ```bash
 python -m pip install -e . && python -m pip install pytest
-python -m pytest -q          # 67 tests, no network, ~0.5s
+python -m pytest -q          # 91 tests, no network, ~0.5s
 ```
 
 There are no fixtures that reach the internet, no fixtures that read your real

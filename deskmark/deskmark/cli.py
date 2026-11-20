@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from deskmark import __version__, SCHEMA_ID
 from deskmark import hooks, store
-from deskmark.errors import PointNotFound, ResumeError
+from deskmark.errors import PointNotFound, DeskmarkError
 from deskmark.capture import capture
 from deskmark.packet import DEFAULT_BUDGET_CHARS, human_age, render, render_json
 from deskmark.restore import apply as apply_plan
@@ -221,7 +221,7 @@ def cmd_look(args: argparse.Namespace) -> int:
         try:
             window = _active_window()
             context = f"The focused window is {window.describe()}.\n\n"
-        except ResumeError:
+        except DeskmarkError:
             context = ""
 
     image = args.image
@@ -415,16 +415,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _guard_stdout() -> None:
+    """Make a failed write to a closed or full stdout not print a traceback.
+
+    Piping into `head` and writing to a full disk are both ordinary, and both
+    end with Python printing "Exception ignored in ..." during shutdown, which
+    looks exactly like a crash. Flushing here and pointing fd 1 at /dev/null
+    when it fails keeps the exit path quiet.
+    """
+    try:
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return int(args.func(args) or 0)
-    except ResumeError as exc:
+    except DeskmarkError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
+    finally:
+        _guard_stdout()
 
 
 if __name__ == "__main__":  # pragma: no cover

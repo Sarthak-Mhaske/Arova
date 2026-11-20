@@ -27,7 +27,31 @@ name and were never published.
 - `deskmark doctor`: reports what this machine can actually capture.
 
 ### Fixed
-- `DESKMARK_HOME` now decides where **everything** lives. Previously the store
+- **The digest is now checked on every read.** It was computed and stored, and
+  then never verified, so a point edited by hand was displayed as if it were the
+  truth. A single-reference read refuses it; a listing skips it.
+- **`deskmark show <id-prefix>` never worked.** References were matched against
+  names only, while the docs promised id prefixes. An ambiguous id prefix, or
+  two points sharing a name, now raises a named error and lists the candidates
+  instead of quietly returning the newest.
+- **`psql postgres://user:hunter2@db/prod` leaked its password.** Redaction only
+  looked for keyword shapes like `password=`, so credentials embedded in a URL
+  went straight into the point. Redaction now also covers `scheme://user:pass@`,
+  Bearer tokens, long flags with a space, and the common token prefixes, and a
+  command that carried a secret is now *kept with the secret removed* instead of
+  being dropped whole.
+- **The privacy summary named what it withheld.** Reasons read
+  `sensitive host chase.com ×1`, which defeats the point of dropping the tab.
+  Rules are now grouped into categories (`withheld: banking ×1`) and the host is
+  never written.
+- **Password managers and health hosts were not blocked at all.** 1password,
+  bitwarden, dashlane and the like were missing from the list, and
+  `my.healthprovider.com` passed because the label rule only matched whole
+  labels. Both fixed, with the deliberate over-drop that comes with matching
+  inside a label.
+- **A non-UTF-8 point file crashed `deskmark list` with a raw traceback.** It is
+  now a corrupt-point error: skipped in a listing, reported on a direct read.
+- **`DESKMARK_HOME` now decides where **everything** lives. Previously the store
   honoured it while the session log did not, so `capture_from_log` found nothing
   on any machine that set the variable. Pinned by a test.
 - `deskmark doctor` recomputed the shell-hook path instead of asking the reader
@@ -42,6 +66,11 @@ name and were never published.
   `~/.deskmark/{points/,index.json,session_log.jsonl}`.
 - `look` reports one readable line per failed screenshot tool instead of a
   truncated stack of warnings.
+- An MCP `resources/read` for a bad uri returns `-32602 unknown resource`
+  instead of `-32603 internal error`.
+- A failed write to stdout (piped into `head`, or a full disk) no longer prints
+  `Exception ignored in ...` on the way out.
+- `ResumeError` is now `DeskmarkError`, the name the docs always used.
 
 ### Notes
 - Zero runtime dependencies. Everything above is standard library only.

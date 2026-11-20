@@ -14,6 +14,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import time
 
 import pytest
@@ -220,10 +221,14 @@ def test_shell_log_yields_last_command_and_failure(home):
     ]
     log.write_text("\n".join(json.dumps(e) for e in events) + "\n")
 
-    refs = capture_from_log(window_hours=1)
+    redactions: list = []
+    refs = capture_from_log(window_hours=1, redactions=redactions)
     assert len(refs) == 1
     ref = refs[0]
-    assert ref.last_command == "rg X-Idempotency"
+    # A command that carried a credential is kept with the secret taken out.
+    # Dropping it would hide the work as well as the secret.
+    assert ref.last_command == "export API_KEY=[redacted]"
+    assert redactions == ["command text ×1"]
     assert ref.last_failure == "pytest tests -k retry"
     assert ref.last_failure_exit == 1
     assert "sk-live" not in json.dumps(ref.to_dict())
@@ -433,7 +438,7 @@ def test_cli_entrypoint_smoke(repo, home):
 # --------------------------------------------------------------------------
 
 def test_corrupt_point_file_raises_a_clean_error(home):
-    from deskmark.errors import CorruptPointError, ResumeError
+    from deskmark.errors import CorruptPointError, DeskmarkError
 
     point = ResumePoint(name="damaged")
     path = store.save(point)
@@ -442,7 +447,7 @@ def test_corrupt_point_file_raises_a_clean_error(home):
 
     with pytest.raises(CorruptPointError) as excinfo:
         store.load(point.id)
-    assert isinstance(excinfo.value, ResumeError)
+    assert isinstance(excinfo.value, DeskmarkError)
     assert "not valid JSON" in str(excinfo.value)
     assert "hint" in str(excinfo.value)
 
@@ -632,3 +637,154 @@ def test_agents_in_a_deleted_directory_are_not_offered(home):
     assert agents.capture_agents(limit=1) == [] or all(
         not a.cwd.endswith(" (deleted)") for a in agents.capture_agents()
     )
+
+
+@pytest.mark.parametrize("command, forbidden", [
+    ("export API_KEY=sk-live-abcdef123456", "sk-live"),
+    ("curl -H 'Authorization: Bearer ghp_secrettoken123' https://api", "ghp_"),
+    ("psql postgres://user:hunter2@db.internal/prod", "hunter2"),
+    ("mysql --password=hunter2 -u root", "hunter2"),
+    ("npm config set //registry/:_authToken=npm_abcdefghijkl", "npm_abc"),
+    ("aws configure set aws_secret_access_key AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+    ("docker login --password s3cr3t-registry-pass", "s3cr3t"),
+])
+def test_redaction_removes_credentials_from_command_text(command, forbidden):
+    from deskmark.providers.privacy import redact_command
+
+    safe, hits = redact_command(command)
+    assert hits >= 1, command
+    assert forbidden not in safe
+    # the shape of the command survives, so the point still says what you ran
+    assert safe.split(" ")[0] in command.split(" ")[0]
+
+
+@pytest.mark.parametrize("command", [
+    "git log --oneline -20",
+    "pytest tests -k retry",
+    "grep -rn token src/",          # the word without a value is not a secret
+    "rg X-Idempotency",
+    "docker compose -f compose.yaml up -d",
+])
+def test_redaction_leaves_ordinary_commands_alone(command):
+    from deskmark.providers.privacy import redact_command
+
+    assert redact_command(command) == (command, 0)
+
+
+def test_a_point_edited_after_it_was_saved_is_refused(home):
+    """The digest is only worth having if every read checks it."""
+    from deskmark.errors import CorruptPointError
+    from deskmark import store
+
+    point = _point("tamper-me")
+    store.save(point)
+    path = os.path.join(store.points_dir(), point.id + ".json")
+    data = json.load(open(path))
+    data["name"] = "edited-by-hand"
+    json.dump(data, open(path, "w"))
+
+    with pytest.raises(CorruptPointError) as excinfo:
+        store.load(point.id)
+    assert "changed after it was saved" in str(excinfo.value)
+
+    # a listing skips it instead of dying on it, and does not become it
+    assert all(entry["id"] != point.id for entry in store.list_points())
+
+
+def test_a_point_that_is_not_utf8_does_not_break_the_listing(home):
+    from deskmark import store
+
+    good = _point("readable")
+    store.save(good)
+    with open(os.path.join(store.points_dir(), "badc0ffee000.json"), "wb") as handle:
+        handle.write(b"\xff\xfe\x00 not utf-8")
+
+    entries = store.list_points()
+    assert [entry["id"] for entry in entries] == [good.id]
+
+
+def test_mcp_rejects_a_resource_path_instead_of_failing_internally(home):
+    """A client may ask for ../../etc/passwd. That is a bad parameter, not a crash."""
+    request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "resources/read",
+                          "params": {"uri": "deskmark://resume/../../etc/passwd"}})
+    out = subprocess.run([sys.executable, "-m", "deskmark", "mcp"], input=request + "\n",
+                         capture_output=True, text=True, timeout=30,
+                         env=dict(os.environ, DESKMARK_HOME=str(home / ".deskmark")))
+    reply = json.loads(out.stdout.splitlines()[0])
+    assert reply["error"]["code"] == -32602
+    assert "unknown resource" in reply["error"]["message"]
+    assert "root:x:" not in out.stdout
+
+
+def _point(name: str) -> "ResumePoint":
+    point = ResumePoint(name=name, host={"hostname": "test-host"})
+    point.digest = point.to_dict()["digest"]
+    return point
+
+
+def test_an_id_prefix_resolves_and_an_ambiguous_one_refuses_to_guess(home):
+    """`deskmark resume <prefix>` must work, and must never pick for you."""
+    from deskmark import store
+    from deskmark.errors import AmbiguousReference
+
+    first = _point("checkout")
+    first.id = "ab1111c0ffee"
+    store.save(first)
+    second = _point("webhooks")
+    second.id = "ab2222deadbb"
+    store.save(second)
+
+    assert store.load("ab1111").name == "checkout"
+    assert store.load("ab1111c0").name == "checkout"
+
+    with pytest.raises(AmbiguousReference) as excinfo:
+        store.load("ab")
+    message = str(excinfo.value)
+    assert "matches 2 resume points" in message
+    # the hint names both candidates, or the error is not actionable
+    assert "ab1111c0ffee" in message and "ab2222deadbb" in message
+
+
+def test_two_points_with_the_same_name_are_ambiguous_not_newest_wins(home):
+    from deskmark import store
+    from deskmark.errors import AmbiguousReference
+
+    store.save(_point("checkout"))
+    store.save(_point("checkout"))
+
+    with pytest.raises(AmbiguousReference) as excinfo:
+        store.load("checkout")
+    assert "named 'checkout'" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("url", [
+    "https://1password.com/vault",
+    "https://my.healthprovider.com/results",
+    "https://bitwarden.com/vault",
+    "https://calendar.google.com/calendar/u/0/r",
+    "https://prod.example.com/admin/users",
+])
+def test_sensitive_pages_are_withheld(url):
+    decision = privacy.classify(url, "some title")
+    assert decision.verdict is privacy.Verdict.DROP
+    # the reason is a category: printing the host would leak what was withheld
+    assert "withheld:" in decision.reason
+    host = url.split("//")[1].split("/")[0]
+    assert host not in decision.reason
+
+
+def test_a_local_dev_server_is_still_restorable():
+    """localhost on a noise port is dropped; an ordinary dev server is kept."""
+    assert privacy.classify("http://localhost:3000/admin", "app").verdict is privacy.Verdict.KEEP
+    assert privacy.classify("http://localhost:5173/", "vite").verdict is privacy.Verdict.DROP
+
+
+def test_the_redaction_summary_never_names_what_it_withheld():
+    from deskmark.providers.privacy import redaction_summary
+
+    reasons = [privacy.classify(u).reason for u in
+               ("https://chase.com/x", "https://chase.com/y", "https://1password.com/vault")]
+    summary = redaction_summary(reasons)
+    blob = " ".join(summary)
+    assert "chase" not in blob and "1password" not in blob
+    assert "×2" in blob

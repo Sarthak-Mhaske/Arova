@@ -497,7 +497,7 @@ only part of Deskmark that makes a network call.
 - [x] MCP server, both protocol revisions, one markdown resource
 - [x] Shell hook, installed and removed between markers
 - [x] `look` — one screenshot, one question, your own key
-- [x] 67 tests, zero runtime dependencies
+- [x] 91 tests, zero runtime dependencies
 - [ ] PyPI release — `pipx install deskmark`
 
 ### v0.4 (Next)
@@ -549,7 +549,7 @@ deskmark/
 │   ├── providers/            # repo, terminals, agents, history, privacy
 │   ├── look/                 # one screenshot, on request
 │   └── hooks/shell_hook.sh   # optional shell hook
-├── tests/                    # 67 tests: promises, not coverage
+├── tests/                    # 91 tests: promises, not coverage
 ├── docs/                     # spec, conformance, architecture, providers,
 │                             # config, structure, testing, demo.tape
 ├── packaging/                # AUR PKGBUILD + release checklist
@@ -579,7 +579,7 @@ deskmark/
 ```bash
 git clone https://github.com/<your-username>/deskmark.git
 cd deskmark
-python -m pip install -e . && python -m pytest -q    # 67 tests, ~0.6s
+python -m pip install -e . && python -m pytest -q    # 91 tests, ~0.6s
 git checkout -b feature/your-feature
 git commit -m "feat: add your feature"
 git push origin feature/your-feature

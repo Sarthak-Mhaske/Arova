@@ -43,10 +43,21 @@ Two independent sources, because both are partial:
 The merge prefers log entries (they carry intent) and keeps live shell
 directories that have no log entry. Capped at 6 shells.
 
-Command text that looks like a credential (`sk-…`, `ghp_…`, `AKIA…`, `--password`,
-`Bearer …`, `export *_KEY=`) is redacted *before* serialisation. The last failed
-command of a directory is the single most useful line in the whole point: it is
-what turns "you were in this folder" into "you were fixing this".
+A command that carries a credential is **kept with the credential removed**, not
+dropped: the last failing command is the single most useful line in the whole
+point, and deleting it would hide the work along with the secret. Four shapes
+are recognised before anything is written:
+
+| Shape | Example becomes |
+|-------|-----------------|
+| `key=value`, `key: value`, `--key=value` | `export API_KEY=[redacted]` |
+| long flags with a space | `docker login --password [redacted]` |
+| `scheme://user:password@host` | `psql postgres://user:[redacted]@db/prod` |
+| well-known token prefixes | `sk-… ghp_… glpat-… npm_… AKIA… AIza… xox…` |
+
+Short flags are deliberately *not* inferred — `-p` is a port, a print or a
+password depending on the program — and a keyword with no value after it
+(`grep -rn token src/`) is left alone.
 
 On macOS and Windows only the hook source exists, so install it if you want
 shells.
@@ -88,13 +99,35 @@ before it is stored:
 
 - **kept** — a page with a path, e.g. a pull request, an issue, a doc page
 - **downranked** — search result pages, new-tab pages, badge counters
-- **dropped** — sensitive hosts, local files, `javascript:`/`data:` URLs, and
-  anything unclassifiable
+- **dropped** — sensitive hosts, local files, `javascript:`/`data:` URLs, admin
+  consoles on remote hosts, and anything unclassifiable
 
-Sensitive means *host and path*, never title: mail, calendar, banks, password
-managers, health, auth flows, admin consoles, private-repo paths. If the
-classification is uncertain, the tab is dropped. The point records how many were
-dropped and why — never which URLs were dropped.
+Sensitive is decided on *host and path*, never on the title, and grouped by
+category so the point can say what it withheld without naming it:
+
+| Category | Examples |
+|----------|----------|
+| `banking` | chase, wells fargo, paypal, stripe dashboard, wise |
+| `trading` | zerodha, groww, coinbase, fidelity |
+| `identity` | google accounts, okta, auth0, 1password, bitwarden, dashlane |
+| `tax-and-government` | irs, incometax.gov.in, passport, mychart |
+| `health` | practo, 1mg, cvs, walgreens |
+| `webmail` | gmail, outlook, proton, fastmail |
+| `calendar` | google calendar, calendly |
+| `social` | instagram, x, whatsapp web, discord |
+
+Plus path rules for auth and payment sessions (`/login`, `/oauth`, `/2fa`,
+`/billing/portal`, `session_token=`) and a host-label rule that catches domains
+carrying words like `bank`, `health`, `wallet`, `insurance` anywhere in the name
+(`my.healthprovider.com`). The label rule over-drops — `investopedia.com` goes
+with it — because over-dropping costs a research tab and under-dropping leaks a
+medical record.
+
+A local dev server is treated as restorable: `localhost:3000/admin` is kept,
+while the same `/admin` path on a remote host is withheld, and noise ports
+(`5173`, `8765`, `1420`, `3030`) are dropped.
+
+The point records how many were dropped and why — never which URLs were dropped.
 
 ## Editors and terminals (restore side)
 

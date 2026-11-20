@@ -78,7 +78,14 @@ someone records.
 
 ## Verified before handover
 
-- `python -m pytest -q` → **67 passed in 0.61s**
+- `python -m pytest -q` → **91 passed in 0.54s**
+- a 47-probe hostile battery against the installed wheel: corrupt/truncated/
+  non-UTF-8/tampered points, index as a directory, read-only store, a home that
+  is a file, ref traversal, 300 changed files, newline and unicode filenames,
+  detached HEAD, worktrees, secret-bearing commands, sensitive hosts, a restore
+  canary that must not execute, headless restore, broken pipe, full disk, MCP
+  traversal/batch/garbage input, 500 sequential MCP calls, 8 concurrent saves,
+  gc racing list, clock skew, 200-point scale. All pass.
 - `python -m build` → wheel + sdist; wheel is 28 files, ships the shell hook, contains no Arova reference
 - wheel installed into a clean venv, then: `--version`, `doctor`, `save`, `list`, `packet`, `resume` (dry run), `mcp` (initialize + tools/list), `look` (error path)
 - store layout is `~/.deskmark/{points,index.json,session_log.jsonl}` — no legacy `resume/` level

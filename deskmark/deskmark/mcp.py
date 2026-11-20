@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from deskmark import __version__, SCHEMA_ID
 from deskmark import store
 from deskmark.capture import capture
+from deskmark.errors import DeskmarkError
 from deskmark.packet import DEFAULT_BUDGET_CHARS, render, render_json
 from deskmark.restore import plan as build_plan
 
@@ -236,7 +237,13 @@ def handle(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         uri = str(params.get("uri") or "")
         prefix = "deskmark://resume/"
         if uri.startswith(prefix):
-            point = store.load(uri[len(prefix):])
+            # A client can ask for anything, including "../../etc/passwd".
+            # Anything that is not an id we hold is an invalid parameter, not
+            # an internal error and never a filesystem path.
+            try:
+                point = store.load(uri[len(prefix):])
+            except DeskmarkError as exc:
+                return _err(msg_id, -32602, f"unknown resource: {uri} ({exc.message})")
             return _ok(msg_id, {"contents": [{"uri": uri, "mimeType": "text/markdown",
                                               "text": render(point)}]})
         return _err(msg_id, -32602, f"unknown resource: {uri}")

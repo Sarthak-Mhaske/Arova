@@ -8,7 +8,7 @@ caller is either a human in a terminal or an agent that will otherwise report
 from __future__ import annotations
 
 
-class ResumeError(Exception):
+class DeskmarkError(Exception):
     """Base class for everything this package raises deliberately."""
 
     def __init__(self, message: str, hint: str = "") -> None:
@@ -20,7 +20,12 @@ class ResumeError(Exception):
         return f"{self.message}" + (f"\n  hint: {self.hint}" if self.hint else "")
 
 
-class StoreError(ResumeError):
+class AmbiguousReference(DeskmarkError):
+    """A reference matched more than one resume point. Restoring the wrong desk
+    is worse than an error message, so this is never resolved by guessing."""
+
+
+class StoreError(DeskmarkError):
     """The store could not be read or written."""
 
 
@@ -32,5 +37,5 @@ class PointNotFound(StoreError):
     """No resume point matches the given reference."""
 
 
-class CaptureError(ResumeError):
+class CaptureError(DeskmarkError):
     """A capture could not be produced at all (providers failing is *not* this)."""
