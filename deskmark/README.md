@@ -1,267 +1,151 @@
-<div align="center">
-
 # Deskmark
 
-**Resume points for your whole desk**
+Resume points for your whole desk.
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](#requirements)
-[![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#platform-support)
-[![MCP](https://img.shields.io/badge/MCP-2026--07--28-6E56CF)](docs/SPEC.md)
-[![Pixels captured](https://img.shields.io/badge/pixels%20captured-0-success)](#privacy)
-[![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)](https://github.com/<your-username>/deskmark/releases)
+One command saves where your work is — repo, branch, dirty files, the files you
+had open, the shells you had rooted somewhere, the agents you had running, the
+tabs you were reading, and the one line that says why. One command puts it back.
 
-One command to save where your work is. One to put it back.  
-No screen recording, no daemon, no account, no network.
-
-[Installation](#installation) · [Commands](#commands) · [The format](docs/SPEC.md) · [MCP](#mcp) · [Architecture](#architecture) · [Roadmap](#roadmap)
-
----
-
-**Also known as:** `resume point` · `work state snapshot` · `workspace restore` · `desk state`
-
-Free, Apache-2.0, no account, no telemetry, no daemon.
-
-</div>
-
----
-
-## Overview
-
-Git remembers what you committed. Nothing remembers **what you were doing**.
-
-Come back to a project after two days and the thing that costs you an hour isn't the
-code — it's that the *reason* for the branch, the tab you were reading, the test that
-was failing and the exact next step all lived in your head.
-
-Deskmark writes that down as a **resume point**: a 3 KB JSON file holding the repo and
-branch you were on, the files in flight, the tabs you were reading, the folders your
-shells were in, the AI agents you had running, and one line each for *why* and
-*what's next*. Then it puts the desk back on request — or hands the file to your agent.
-
----
-
-## Demo
-
-### Resume: the whole point
-
-Close everything. Come back tomorrow.
+No screen recording. No daemon. No account. No network. A resume point is 2–4 KB
+of structured JSON, and it is yours.
 
 ```console
 $ deskmark save checkout-idempotency
-✓ resume point checkout-idempotency  3.6 KB · zero pixels
-  repo    api@feat/checkout-idempotency (1 modified, 1 new)
-  held    3 files · 3 tabs · 1 shell · agents claude
-  why     working on "checkout idempotency" (1 file changed, 2 insertions(+))
-  next    src/webhooks/handler.py:3 — TODO: backfill duplicate-delivery test
+✓ resume point checkout-idempotency  2.0 KB · zero pixels
+  repo    acme-api@feat/checkout (3 changed)
+  held    4 files · 2 shells · 1 agent · 6 tabs
+  why     make retries idempotent (from branch)
+  next    replay the webhook twice
   saved   ~/.deskmark/points/2d3689204957.json
-```
 
-```console
 $ deskmark resume
-Restore plan for "checkout-idempotency" (8 actions)
-  ▣ folder   /code/acme/api   -> code (editor)
-  ▤ file     src/webhooks/handler.py
-  ▤ file     src/webhooks/idempotency.py
-  ◈ url      https://github.com/acme/api/pull/412  -- Add checkout idempotency · PR #412
-  ◈ url      https://stripe.com/docs/webhooks/best-practices
-  ▸ terminal /code/acme/api
-  ✦ hint     claude: claude --resume 8f2c1e4a-77b3-4c19-9f11-2b6d5a0c3e77
+Restore plan for "checkout-idempotency" (5 actions)
+  ▣ folder   /home/me/acme/api
+  ▤ file     /home/me/acme/api/app/checkout.py
+  ▸ terminal /home/me/acme/api   -> cd /home/me/acme/api
+  ↗ tab      github.com/acme/api/pull/412
+  ⚑ agent    claude --resume 8f2c...   (in /home/me/acme/api)
   recorded commands are shown above but never executed.
 
-dry run — nothing was opened. Re-run with --yes to restore.
+$ deskmark resume --yes        # now actually open it
 ```
 
-### Your agent keeps the thread too
+**Status:** pre-1.0. Linux is the measured platform; macOS is close behind;
+Windows is best-effort. See [Roadmap](#roadmap).
 
-An agent that can read a resume point stops asking you to re-explain the project.
-
-```console
-$ claude   # ... later, after context compaction
-> what was I doing?
-
-  [deskmark · resume_latest]
-  Resume point: checkout-idempotency — captured 2h ago · fresh
-  branch  feat/checkout-idempotency
-  next    src/webhooks/handler.py:3 — TODO: backfill duplicate-delivery test
-  reading https://stripe.com/docs/webhooks/best-practices
-  agents  claude in /code/acme/api
-```
-
-The agent can save one too, before it forgets everything.
-
-### Reproducible
-
-The terminal demos come from `scripts/demo.sh`, which builds a throwaway "developer
-machine" in `/tmp/deskmark-demo` and never touches your real home directory. GIFs are
-rendered from `docs/demo.tape` with [VHS](https://github.com/charmbracelet/vhs):
-
-```bash
-./scripts/demo.sh          # see it run, now
-vhs docs/demo.tape         # render assets/demo.gif
-```
+[![CI](https://github.com/<your-username>/deskmark/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/deskmark/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+[![Dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-67-brightgreen.svg)](tests/)
 
 ---
 
-## How it works
+## Highlights
 
-**Structured signals in, a small file out.** Deskmark asks the things your OS already
-knows instead of recording your screen.
+- **Save the whole desk in one command**, not just one app. Repo, files, shells,
+  agents, tabs, intent.
+- **Restore is a dry run by default.** You see the plan and the exact actions
+  before anything opens. Nothing is ever spawned by accident.
+- **Zero pixels.** Structured signals only: paths, branch names, exit codes,
+  hosts and paths. No screenshots, no keystrokes, no window titles, no OCR.
+- **Zero runtime dependencies.** Standard library only, Python 3.9+, ~3.6k
+  lines. It installs in a second and cannot rot.
+- **No daemon and no server.** Every command starts, does one thing, and exits.
+  There is no background process to babysit and no port to expose.
+- **Redaction happens before the file is written.** Sensitive hosts (mail, banks,
+  password managers, health, auth) and anything that looks like a credential
+  never enter the point. The drop is counted, never the URL.
+- **An agent can read it.** `deskmark mcp` is a stdio MCP server, and
+  `deskmark packet` prints the same context for anything that speaks
+  stdin and stdout.
+- **The format is plain JSON** — readable, diffable, committable, and specified
+  in [docs/spec.md](docs/spec.md). Nothing here needs Deskmark to be read.
 
-```
-┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐
-│ git state  │   │  browser   │   │ shell hook │   │  agent     │
-│ branch,    │   │  history   │   │ + /proc    │   │ processes  │
-│ dirty set  │   │ (7 kinds) │   │ cwd, exit  │   │ + sessions │
-└─────┬──────┘   └─────┬──────┘   └─────┬──────┘   └─────┬──────┘
-      │                │                │                │
-      └────────────────┴───────┬────────┴────────────────┘
-                                ▼
-                    ┌───────────────────────┐
-                    │   privacy policy      │  host + path only,
-                    │   (counted drops)     │  never free-text titles
-                    └───────────┬───────────┘
-                                ▼
-                    ┌───────────────────────┐
-                    │  deskmark/v1      │  3 KB JSON, digest,
-                    │  ResumePoint          │  provenance, TTL
-                    └───────────┬───────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        ▼                       ▼                       ▼
-┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-│ deskmark resume  │      │ deskmark packet  │      │  deskmark mcp    │
-│ reopen desk   │      │ agent context │      │ tools + res.  │
-└───────────────┘      └───────────────┘      └───────────────┘
-```
+## What a resume point holds
 
-> **Zero pixels.** Deskmark never captures a screenshot, never starts a microphone, never
-> opens a socket. There is no image to leak and no video to subpoena. Monthly storage is
-> measured in megabytes, not tens of gigabytes.
+| Part | Example | Source |
+|------|---------|--------|
+| **repo** | `acme-api@feat/checkout` · head `4c1e0a9` · 3 changed | `git` |
+| **files** | `app/checkout.py`, `tests/test_checkout.py`, `README.md` | working set, most specific first |
+| **editor** | `code` with 2 files open | process list + editor state |
+| **shells** | `/home/me/acme/api` — last command `pytest -k retry`, exit `1` | shell hook log, or `/proc` |
+| **agents** | `claude` in `/home/me/acme/api`, resumable | process scan + session files |
+| **tabs** | `github.com/acme/api/pull/412`, `docs.stripe.com/api/idempotent` | browser history, host+path filtered |
+| **why** | "make retries idempotent" | `--why`, branch, last commit, last command |
+| **next** | "replay the webhook twice" | `--next`, or the first TODO in a changed file |
 
----
+Every part carries a confidence and a time-to-live, because a stale hint is
+worse than no hint. Everything degrades quietly: a missing browser, a locked
+database, or a non-git directory produces a warning, never a crash.
 
-> **⚠️ Early software notice**
->
-> v0.2 is the primitive, not the product. `save`, `resume`, `packet` and `mcp` are
-> tested (61 tests). Restore adapters are best on Linux, good on macOS, and use the OS
-> opener on Windows. The UI, the editor extension and cross-machine resume are on the
-> [roadmap](#roadmap) — they are not in this release.
+## Install
 
----
-
-## Features
-
-### What it captures
-
-| Signal | Source | Leaves your machine |
-|--------|--------|:-------------------:|
-| Repo, branch, head, dirty set, diffstat, recent commits | `git` | ✗ never |
-| Files and folders in the working set, ranked by reason | git + filesystem | ✗ never |
-| Tabs you were reading | browser history DBs (7 browsers), read-only copy | ✗ never |
-| Shell roots, last command, **last failure and exit code** | shell hook + `/proc` | ✗ never |
-| Running AI agents and their session ids | `/proc` + agent session files | ✗ never |
-| `why` and `next_step` | derived deterministically from the above | ✗ never |
-
-### What it deliberately does not do
-
-- ❌ Screenshots, OCR, screen video, audio
-- ❌ Network calls of any kind (no telemetry, no sync, no update check)
-- ❌ Running recorded commands on restore
-- ❌ A background daemon
-- ❌ A database (a resume point is a file)
-
-### Privacy
-
-Filtering happens **before anything touches disk**, and it is decided on host and path —
-never on free-text titles. (An earlier version matched the word "checkout" inside a pull
-request title and silently deleted real work. That bug is now a test.)
-
-Dropped by default: banking and payments, identity providers and sign-in flows, health,
-tax and government, webmail, social and chat, local dev UI, blank pages.
-
-Every drop is **counted** and written into the point, so you can see what was withheld
-instead of assuming the tool saw everything:
-
-```json
-"redactions": ["sensitive host mail.google.com ×1", "sensitive host chase.com ×2"]
-```
-
----
-
-## Requirements
-
-- **Python** 3.9 or newer (tested on 3.11) — no third-party packages
-- **git** (optional, for repo state)
-- **An editor CLI** (optional, for restore): `code`, `cursor`, `zed`, `subl`
-- **A terminal** (optional, for restore): kitty, wezterm, alacritty, ghostty, gnome-terminal, konsole, xterm
-
-Works on Linux, macOS and Windows.
-
----
-
-## Installation
-
-### Quick install
-
-Not on PyPI yet — v0.2 installs from source, in one step:
-
-```bash
-git clone https://github.com/<your-username>/deskmark.git && cd Deskmark
-python -m pip install -e .        # or: pipx install -e .
-deskmark doctor                      # what can this machine capture?
-```
-
-> `pipx install deskmark` and a single static binary arrive with v1.0 (see [Roadmap](#roadmap)).
-
-### Manual setup
-
-<details>
-<summary>Click to expand</summary>
-
-**1. From source**
+Not on PyPI yet — it goes up with v0.4. Until then, from source:
 
 ```bash
 git clone https://github.com/<your-username>/deskmark.git
-cd Deskmark
-python -m pip install -e .
+cd deskmark
+pipx install .          # or: uv tool install .   or: python -m pip install -e .
 ```
 
-**2. Try it without touching your real home**
+Arch users can build the package in [`packaging/aur`](packaging/aur/PKGBUILD).
+
+## Quick start
+
+1. See what this machine can actually capture:
+
+   ```bash
+   deskmark doctor
+   ```
+
+2. Save your first resume point, from inside the repo you are working in:
+
+   ```bash
+   deskmark save
+   ```
+
+3. Look at it as the context an agent would get:
+
+   ```bash
+   deskmark packet
+   ```
+
+4. Put your desk back — dry run first, then for real:
+
+   ```bash
+   deskmark resume
+   deskmark resume --yes
+   ```
+
+5. Optional, and the only thing that makes restore *specific*: the shell hook.
+   It records the last command and the last failure per directory.
+
+   ```bash
+   deskmark hooks            # appends one line to ~/.bashrc / ~/.zshrc
+   deskmark hooks --dry-run  # show me first
+   ```
+
+A throwaway demo machine in `/tmp` (no browser, no agents, no shell hook):
 
 ```bash
-./scripts/demo.sh            # builds /tmp/deskmark-demo and runs save + packet + resume
+./scripts/demo.sh
 ```
-
-**3. Optional: install the shell hook**
-
-Without it, Deskmark still sees live shells and git state. With it, it also knows what last
-failed and where — which is what makes the "next" line useful.
-
-```bash
-deskmark hooks                  # adds one marked block to ~/.zshrc or ~/.bashrc
-deskmark hooks --uninstall      # removes exactly that block
-```
-
-</details>
-
----
 
 ## Commands
 
 | Command | What it does |
 |---------|--------------|
-| `deskmark save [name]` | Capture a resume point of the current work (name optional) |
+| `deskmark save [name]` | Capture a resume point of the current work |
 | `deskmark resume [ref]` | Show the restore plan; `--yes` actually opens things |
-| `deskmark list` | All resume points, newest first, with age and staleness |
-| `deskmark show [ref]` | One point as a context packet |
+| `deskmark list` | All points, newest first, with age and freshness |
+| `deskmark show [ref]` | One point, rendered as a context packet |
 | `deskmark packet [ref]` | Just the packet, for piping into an agent |
 | `deskmark mcp` | Run the MCP server on stdio |
-| `deskmark doctor` | Check what this machine can capture |
 | `deskmark hooks` | Install or remove the shell hook |
+| `deskmark look [question]` | Ask about what is on screen, with your own key |
 | `deskmark gc` | Delete old points (`--max 200 --days 30`) |
-
-Useful flags:
+| `deskmark doctor` | Check what this machine can capture |
 
 ```bash
 deskmark save checkout -n "why this work exists" --next "the single next action"
@@ -272,35 +156,18 @@ deskmark show --json                      # machine-readable
 deskmark packet --budget 1200             # token budget, in characters
 ```
 
----
+A `ref` is a point id, a unique id prefix, or a name. Ambiguity is an error, not
+a guess. Full flag reference: [docs/config.md](docs/config.md).
 
-## Looking at your screen
+## Agents (MCP)
 
-`deskmark save` never touches the pixels. When you *want* eyes, there is one
-command for it:
-
-```bash
-deskmark look                                  # what am I looking at?
-deskmark look "why is this test failing"       # ask about this screen
-deskmark look --window "what changed here"     # include the focused window's name
-deskmark look --image shot.png "explain this"  # ask about a file instead
-```
-
-It takes **one** screenshot, sends it to the provider you configured, prints
-the answer, and exits. There is no daemon, no recording, no history of what you
-looked at, and no default account. Bring a key:
+Add Deskmark as a stdio MCP server. Claude Code:
 
 ```bash
-export GEMINI_API_KEY=...      # cheapest vision per image (~$0.001)
-# or OPENAI_API_KEY / ANTHROPIC_API_KEY
+claude mcp add deskmark -- deskmark mcp
 ```
 
-Capture works with whatever the machine has — Pillow if installed, otherwise
-`grim` on wlroots/Wayland, `scrot` on X11, `screencapture` on macOS, PowerShell
-on Windows. If none is available, `deskmark look` tells you exactly what to install
-and takes nothing.
-
-## MCP
+Anything with an `mcpServers` block (Cursor, Windsurf, VS Code, Zed…):
 
 ```json
 {
@@ -310,220 +177,114 @@ and takes nothing.
 }
 ```
 
-| Tool | Purpose |
+| Tool | Returns |
 |------|---------|
-| `resume_latest` | Read the newest point as a context packet |
-| `resume_point_save` | Checkpoint the current state before context is lost |
-| `resume_points_list` | List points with age and staleness |
-| `resume_point_get` | One point, as a packet or raw JSON |
-| `resume_point_plan` | What a restore *would* open — read-only |
+| `resume_latest` | The most recent fresh point as a context packet |
+| `resume_points_list` | Points with name, age and freshness |
+| `resume_point_get` | One point by ref |
+| `resume_point_save` | Capture the current state, from inside the repo |
+| `resume_point_plan` | The restore plan — what would open, never opening it |
 
-Resources: `deskmark://resume/<id>`.
+Resources: `deskmark://resume/<id>` (markdown). The server answers
+`2025-06-18` and `2026-07-28` protocol revisions, and `server/discover`
+works before you have ever saved a point.
 
-Speaks **both** MCP eras: the stateless `server/discover` call from the 2026-07-28
-revision and the legacy `initialize` handshake, so it works with current and older
-clients alike.
+The packet is plain text and bounded, so it is safe to put in a prompt: it
+lists the repo, the working set, the failed command, the open questions, and the
+single next action. It never contains file contents.
 
----
+## Looking at your screen (optional)
 
-## Configuration
-
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `DESKMARK_HOME` | `~/.deskmark` | Where points are stored |
-| `DESKMARK_EDITOR` | auto-detect | Editor command used by restore, e.g. `cursor` |
-| `XDG_DATA_HOME` | `~/.local/share` | Where the shell hook writes its log |
-
-Everything lives under `~/.deskmark/`:
-
-```
-~/.deskmark/
-├── points/
-│   └── 2d3689204957.json         # one file per resume point
-├── index.json                    # a cache: rebuilt from the files above
-├── session_log.jsonl             # only if `deskmark hooks` was run
-└── shell_hook.sh                 # only if `deskmark hooks` was run
-```
-
-> **Uninstall:** delete `~/.deskmark` and Deskmark has no memory of you. That is the whole uninstall.
-
----
-
-## Architecture
-
-```
-DESKMARK
-├── cli.py          # save · resume · list · show · packet · mcp · doctor · hooks · gc
-├── capture.py      # assemble a point; every provider may fail, none may crash
-├── schema.py       # deskmark/v1: provenance, TTL, digest, validation
-├── intent.py       # deterministic why / next_step, each tagged with its source
-├── packet.py       # token-budgeted context packet for agents
-├── restore.py      # plan -> dry run -> apply; never executes a command
-├── store.py        # files, not a database; atomic writes
-├── mcp.py          # dual-era MCP server over stdio
-└── providers/
-    ├── repo.py     # git state, working set, TODO markers
-    ├── history.py  # browser history across 5 browsers, no extension
-    ├── privacy.py  # host-and-path policy with counted redactions
-    ├── terminal.py # shell hook log + /proc
-    └── agents.py   # running agents + recovered session ids
-```
-
-**Zero runtime dependencies.** Standard library only. The format is language-agnostic
-JSON, so another implementation can read and write it without Deskmark — that is the point
-of a format.
-
----
-
-## Troubleshooting
-
-<details>
-<summary><b>No tabs captured</b></summary>
-
-Deskmark reads history databases directly, so it needs at least one browser profile it
-recognises (Chrome, Chromium, Brave, Edge, Vivaldi, Arc, Firefox).
+One screenshot, one question, answered by a model **you** pay, with a key
+**you** set. Nothing is stored, nothing is watched, and nothing leaves the
+machine unless you type this command.
 
 ```bash
-deskmark doctor                     # shows profile count and policy drops
-deskmark save test --window 168     # widen the window to 7 days
+deskmark look                        # explain this screen
+deskmark look "why is this failing"  # ask about this screen
+deskmark look --window "what changed"    # include the focused window name
+deskmark look --image shot.png "..."     # ask about a file instead
+deskmark look --json                 # provider, model, ms, bytes
 ```
-</details>
 
-<details>
-<summary><b>No agents detected</b></summary>
+Keys: `GEMINI_API_KEY` (cheapest, default `gemini-3-flash`), `OPENAI_API_KEY`
+(`gpt-5-mini`), or `ANTHROPIC_API_KEY` (`claude-sonnet-4-5`). Roughly
+$0.0015 per look on Gemini. If neither a screenshot tool nor a key exists, you
+get one line telling you exactly what to install or set —
+`deskmark doctor --look-keys` reports both.
 
-Agents are found by scanning `/proc` (Linux) for known command lines. On macOS and
-Windows this provider is currently a no-op.
+## Privacy
 
-```bash
-deskmark doctor                     # check the "claude sessions" line
-```
-</details>
+The only claim that matters, and how it is enforced:
 
-<details>
-<summary><b>Resume opens nothing</b></summary>
+- **Nothing is uploaded.** No telemetry, no analytics, no update check, no
+  crash reporting. `deskmark look` is the single exception, and it is
+  one-shot, opt-in, and per invocation.
+- **Nothing visual is captured.** No screenshots, no OCR, no window titles, no
+  keystrokes. Restoring *opens* things; it never synthesises input.
+- **Filtering is on host and path, never on free text.** A filter that matched
+  the word "checkout" inside a pull request title would silently delete real
+  work — so it does not exist. See
+  [`providers/privacy.py`](deskmark/providers/privacy.py).
+- **Credentials never enter a point.** Command text that looks like a secret is
+  redacted before the write, and the redaction is counted.
+- **Recorded commands are context, not instructions.** Restore displays them.
+  It never executes them.
+- **Uninstall is honest.** Delete `~/.deskmark` and Deskmark has no memory of
+  you. That is the whole uninstall.
 
-Restore is a dry run unless you pass `--yes`, and it needs a way to open things.
+## Documentation
 
-```bash
-deskmark resume --yes
-export DESKMARK_EDITOR=cursor       # if no editor was auto-detected
-```
-</details>
+| Document | Contents |
+|----------|----------|
+| [docs/spec.md](docs/spec.md) | The `deskmark/v1` format, field by field |
+| [docs/conformance.md](docs/conformance.md) | Rules any other implementation must pass |
+| [docs/architecture.md](docs/architecture.md) | Modules, data flow, invariants |
+| [docs/providers.md](docs/providers.md) | What is detected, per editor, terminal, browser and agent |
+| [docs/config.md](docs/config.md) | Every flag, environment variable and file |
+| [docs/structure.md](docs/structure.md) | Repository layout |
+| [docs/testing.md](docs/testing.md) | How to run and extend the tests |
+| [AGENTS.md](AGENTS.md) | Instructions for a coding agent working on this repo |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
-<details>
-<summary><b>A path is marked "missing"</b></summary>
+## Platform support
 
-The point came from a directory that no longer exists — usually a different machine.
-Restore skips those instead of failing.
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Repo, working set, open questions | ✓ | ✓ | ✓ |
+| Editor and files | ✓ | ✓ | ✓ |
+| Shells and last failure | ✓ hook + `/proc` | hook | hook |
+| Agents | ✓ | ✓ | partial |
+| Browser tabs | ✓ | ✓ | ✓ |
+| `look` screenshots | ✓ `grim` / `scrot` / `import` | ✓ `screencapture` | ✓ PowerShell |
 
-```bash
-deskmark resume --json | grep missing
-```
-</details>
-
-**Common fixes:**
-
-| Problem | Solution |
-|---------|----------|
-| `command not found: deskmark` | Add `~/.local/bin` to `PATH` (pipx) |
-| Empty `why` / `next` | `deskmark save name --next "..."`, or leave a TODO in a changed file |
-| Tabs feel wrong | `--no-browser`, or widen `--window` |
-| Point says STALE | Older than its TTL (7 days); verify before trusting it |
-| Nothing captured at all | `deskmark doctor`, and check you're inside a directory with files |
-
----
+Linux is where restore fidelity is measured. If a restore step cannot be
+performed on your machine, `deskmark resume` says so in the plan instead of
+failing halfway through.
 
 ## Roadmap
 
-### v0.3 — the primitive (current)
+- **v0.4 — restore fidelity on Linux, measured.** Five real setups, each
+  restored end to end, with the failures written down. `deskmark resume` reports
+  what it could not restore. PyPI release. *Kill criterion: below 80% of plan
+  actions succeed on an ordinary VS Code + iTerm + Chrome desk.*
+- **v0.5 — the format gets readers.** MCP registry, Claude plugin directory,
+  AUR, and the conformance document implemented by something that is not
+  Deskmark.
+- **v1.0 — the binary.** A Rust implementation of `deskmark/v1` with the same
+  CLI surface and the same tests, for machines that do not have Python.
 
-- [x] `deskmark/v1` format + [spec](docs/SPEC.md)
-- [x] CLI: save / resume / list / show / packet / mcp / doctor / hooks / gc
-- [x] Dual-era MCP server
-- [x] Privacy policy on host + path, with counted redactions
-- [x] Zero dependencies, 61 tests, Apache-2.0
-
-### v0.4 — the surfaces
-
-- [ ] `deskmark ui` — the resume gallery and selective restore, in the browser
-- [ ] VS Code / Cursor extension: real open editors and unsaved state
-- [ ] `deskmark diff <a> <b>` — what changed between two points
-- [ ] Auto-checkpoint hooks for Claude Code / Codex / Cursor
-
-### v1.0 — the binary
-
-- [ ] **Rewrite the core in Rust**: one static binary, no Python runtime
-- [ ] `brew install deskmark` · `cargo install deskmark` · `curl | sh`
-- [ ] Desktop shell (Tauri) around the same UI
-- [ ] Cross-machine resume: a point committed to a repo resumes on another laptop
-
-### Platform support
-
-| Platform | Capture | Restore | Notes |
-|----------|:-------:|:-------:|-------|
-| Linux | ✓ | ✓ | Primary target. All providers available. |
-| macOS | ◐ | ✓ | git, browser history and the shell hook work; `/proc` providers (live shells, agents) are Linux-only. |
-| Windows | ◐ | ◐ | git and browser history work. Restore opens via the OS; terminal adapters are partial. |
-
-### Provider support
-
-| Provider | Status |
-|----------|:-------|
-| git state, working set, TODOs | ✓ |
-| Chrome / Chromium / Brave / Edge / Vivaldi / Arc / Firefox | ✓ |
-| Shell hook + `/proc` shells | ✓ |
-| Claude Code, Codex, Cursor, OpenCode, OpenClaw, Aider, Gemini, Goose, Amp | ✓ |
-| Terminal, Zed, JetBrains, Sublime (installed-app restore) | ✓ |
-| macOS Spaces, Windows virtual desktops, tmux layouts | Planned (v0.4) |
-
----
-
-## File structure
-
-```
-Deskmark/
-├── deskmark/
-│   └── core/platform/       # cross-platform catalog + launcher (from v0.1)
-├── docs/
-│   ├── RESUME_POINT.md      # the format specification
-│   └── demo.tape            # VHS script that renders the demo GIF
-├── scripts/demo.sh          # throwaway demo machine in /tmp
-├── tests/                   # 61 tests: promises, not coverage
-```
-
----
+Nothing after v0.4 ships until v0.4 is green.
 
 ## Contributing
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md). Two rules: every promise gets a test,
+and nothing new may leave the machine.
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/Deskmark.git
-git checkout -b feature/your-feature
-# make changes, add a test
-git commit -m "feat: add your feature"
-git push origin feature/your-feature
-# open a Pull Request
+python -m pip install -e . && python -m pytest -q   # 67 tests, ~0.5s
 ```
-
-**Commit format:** `type: description`  
-Types: `feat`, `fix`, `docs`, `refactor`, `chore`
-
-Before you open a PR, read the four rules in [CONTRIBUTING.md](CONTRIBUTING.md). The
-short version: zero pixels, resume not search, never execute recorded commands, say what
-is missing.
-
----
-
-## Acknowledgments
-
-Deskmark v0.2 is built on the surviving parts of **Deskmark v0.1**, a desktop cognitive-runtime
-experiment. Its cross-platform application catalog (`deskmark/core/platform/`) and its
-privacy-first shell hook were too good to throw away, so they weren't.
-
-The context-switching research referenced above is by Gloria Mark and
-colleagues at UC Irvine.
 
 ## License
 
-[Apache-2.0](LICENSE). The format is meant to be implemented by other tools — this
-repository should be the reference implementation, not the only option.
+Apache-2.0. See [LICENSE](LICENSE).

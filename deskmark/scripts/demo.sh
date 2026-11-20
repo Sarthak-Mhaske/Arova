@@ -19,7 +19,6 @@ rm -rf "$ROOT"; mkdir -p "$ROOT/home/.local/share/deskmark" "$ROOT/home/.config/
 
 export HOME="$ROOT/home"
 export DESKMARK_HOME="$ROOT/home/.deskmark"
-export XDG_DATA_HOME="$ROOT/home/.local/share"
 export PYTHONPATH="$REPO_DIR"
 
 cd "$ROOT/code/acme/api"
@@ -31,11 +30,12 @@ git checkout -q -b feat/checkout-idempotency
 printf 'def handle(event):\n    # TODO: backfill duplicate-delivery test before enabling retries\n    return {"ok": True}\n\nRETRY_POLICY = {"attempts": 3, "idempotency_required": True}\n' > src/webhooks/handler.py
 printf '# FIXME: decide whether idempotency keys live in the envelope or the DB\nSTORES = {}\n' > src/webhooks/idempotency.py
 
-cat > "$XDG_DATA_HOME/deskmark/session_log.jsonl" <<'JSON'
+mkdir -p "$DESKMARK_HOME"
+cat > "$DESKMARK_HOME/session_log.jsonl" <<'JSON'
 {"timestamp":"2026-11-20T09:12:04+00:00","type":"terminal_command","data":{"command":"pytest tests -k retry","cwd":"__CWD__","cmd_id":"c1","cmd_type":"test_run"}}
 {"timestamp":"2026-11-20T09:12:19+00:00","type":"terminal_output","data":{"command":"pytest tests -k retry","cmd_id":"c1","exit_code":1,"duration_ms":14920}}
 JSON
-sed -i "s|__CWD__|$ROOT/code/acme/api|g" "$XDG_DATA_HOME/deskmark/session_log.jsonl"
+sed -i "s|__CWD__|$ROOT/code/acme/api|g" "$DESKMARK_HOME/session_log.jsonl"
 
 mkdir -p "$HOME/.claude/projects/$(echo "$ROOT/code/acme/api" | tr '/' '-')"
 : > "$HOME/.claude/projects/$(echo "$ROOT/code/acme/api" | tr '/' '-')/8f2c1e4a-77b3-4c19-9f11-2b6d5a0c3e77.jsonl"
@@ -63,10 +63,10 @@ sleep 0.4
 
 cd "$ROOT/code/acme/api"
 echo "── deskmark save ─────────────────────────────────────────────"
-"$PY" -m deskmark.resume save "checkout-idempotency"
+"$PY" -m deskmark save "checkout-idempotency"
 echo
 echo "── deskmark packet ───────────────────────────────────────────"
-"$PY" -m deskmark.resume packet
+"$PY" -m deskmark packet
 echo
 echo "── deskmark resume (dry run) ─────────────────────────────────"
-"$PY" -m deskmark.resume resume
+"$PY" -m deskmark resume

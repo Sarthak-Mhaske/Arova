@@ -12,7 +12,7 @@ a finished, installable, testable project.
 
 ```
 deskmark/
-├── deskmark/                 # the package (4,476 lines of Python, standard library only)
+├── deskmark/                 # the package (~3,700 lines of Python, standard library only)
 │   ├── schema.py  store.py   # the deskmark/v1 format, and where points live
 │   ├── capture.py intent.py  # what is happening, and why
 │   ├── packet.py  restore.py # agent packet, restore plan, apply
@@ -21,15 +21,27 @@ deskmark/
 │   ├── providers/            # repo, terminals, agents, browser history, privacy
 │   ├── look/                 # one screenshot, on request, with your own key
 │   └── hooks/shell_hook.sh   # optional shell hook, shipped inside the wheel
-├── tests/                    # 62 tests, no network, ~0.45s
+├── tests/                    # 67 tests, no network, ~0.6s
 ├── docs/
-│   ├── SPEC.md               # the deskmark/v1 format specification
-│   ├── CONFORMANCE.md        # what any other implementation must pass
+│   ├── spec.md               # the deskmark/v1 format specification
+│   ├── conformance.md        # what any other implementation must pass
+│   ├── architecture.md       # modules, data flow, invariants
+│   ├── providers.md          # what is detected, per editor/terminal/browser/agent
+│   ├── config.md             # every flag, env var and file
+│   ├── structure.md          # repository layout
+│   ├── testing.md            # how to run and extend the tests
 │   └── demo.tape             # VHS script for the demo GIF
+├── packaging/
+│   ├── aur/PKGBUILD + .SRCINFO   # Arch package
+│   └── RELEASE.md            # release checklist
 ├── scripts/demo.sh           # throwaway demo machine in /tmp
-├── .github/workflows/ci.yml  # 3 OS × 3 Python + wheel + MCP protocol smoke test
+├── .github/
+│   ├── workflows/ci.yml      # 3 OS × 3 Python + wheel + MCP protocol smoke test
+│   ├── workflows/release.yml # tag-triggered: version check, PyPI, GitHub release
+│   └── ISSUE_TEMPLATE/       # bug report + feature request forms
 ├── pyproject.toml            # hatchling, zero dependencies, `deskmark` entry point
-├── README.md  CHANGELOG.md  CONTRIBUTING.md  LICENSE (Apache-2.0)  .gitignore
+├── README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  AGENTS.md
+├── LICENSE (Apache-2.0)  .editorconfig  .gitignore
 ```
 
 ## Publish it (once, by hand)
@@ -50,7 +62,7 @@ grep -rn "<your-username>" .        # 4 hits, all cosmetic
 
 ## Verified before handover
 
-- `python -m pytest -q` → **62 passed in 0.44s**
+- `python -m pytest -q` → **67 passed in 0.61s**
 - `python -m build` → wheel + sdist; wheel is 28 files, ships the shell hook, contains no Arova reference
 - wheel installed into a clean venv, then: `--version`, `doctor`, `save`, `list`, `packet`, `resume` (dry run), `mcp` (initialize + tools/list), `look` (error path)
 - store layout is `~/.deskmark/{points,index.json,session_log.jsonl}` — no legacy `resume/` level

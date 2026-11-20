@@ -260,10 +260,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     editor = editor_command()
     checks.append(("editor", bool(editor), " ".join(editor) if editor else "set DESKMARK_EDITOR (e.g. code)"))
 
-    hook_log = os.path.join(
-        os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"),
-        "deskmark", "session_log.jsonl",
-    )
+    # Same function the reader uses. Recomputing the path here is how doctor
+    # ends up telling you to install a hook that is already installed.
+    from deskmark.providers.terminal import log_path
+
+    hook_log = log_path()
     checks.append(("shell hook", os.path.exists(hook_log),
                    hook_log if os.path.exists(hook_log) else "run `deskmark hooks`"))
 

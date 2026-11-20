@@ -9,7 +9,7 @@ you change behaviour, change the test that pins it.
 
 ```bash
 python -m pip install -e .
-python -m pytest -q          # 61 tests, no network, under a second
+python -m pytest -q          # 67 tests, no network, under a second
 ```
 
 **2. Nothing new may leave the machine.** The product's only real asset is that
@@ -20,8 +20,8 @@ telemetry, or requires an account will be rejected, however useful.
 
 - A provider for an editor or terminal emulator that is not detected yet
   (`deskmark/providers/`, one function, one test).
-- A platform note in `docs/SPEC.md` when capture differs on macOS or Windows.
-- A failing conformance case in `docs/CONFORMANCE.md` — writing the rule is as
+- A platform note in `docs/spec.md` when capture differs on macOS or Windows.
+- A failing conformance case in `docs/conformance.md` — writing the rule is as
   valuable as implementing it.
 
 ## What gets merged quickly

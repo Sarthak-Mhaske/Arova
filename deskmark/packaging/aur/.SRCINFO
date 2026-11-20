@@ -1,0 +1,18 @@
+pkgbase = deskmark
+	pkgdesc = Resume points for your whole desk: save where your work is, put it back, hand it to an agent
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://github.com/<your-username>/deskmark
+	arch = any
+	license = Apache-2.0
+	makedepends = python-build
+	makedepends = python-installer
+	makedepends = python-hatchling
+	makedepends = python-wheel
+	checkdepends = python-pytest
+	depends = python
+	options = !strip
+	source = deskmark-0.3.0.tar.gz::https://github.com/<your-username>/deskmark/archive/v0.3.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = deskmark

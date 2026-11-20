@@ -13,9 +13,15 @@ import os
 import shutil
 from typing import List
 
+from .store import deskmark_home
+
 BLOCK_START = "# >>> deskmark shell hook >>>"
 BLOCK_END = "# <<< deskmark shell hook <<<"
-HOOK_DEST = os.path.join(os.path.expanduser("~"), ".deskmark", "shell_hook.sh")
+
+
+def hook_dest() -> str:
+    """The installed hook follows DESKMARK_HOME, like the points and the log."""
+    return os.path.join(deskmark_home(), "shell_hook.sh")
 
 
 def _source_hook() -> str:
@@ -34,12 +40,12 @@ def install(dry_run: bool = False) -> List[str]:
     if not os.path.exists(source):
         return [f"hook script missing at {source}"]
 
-    os.makedirs(os.path.dirname(HOOK_DEST), exist_ok=True)
     if not dry_run:
-        shutil.copyfile(source, HOOK_DEST)
-    actions.append(f"copied hook to {HOOK_DEST}")
+        os.makedirs(os.path.dirname(hook_dest()), exist_ok=True)
+        shutil.copyfile(source, hook_dest())
+    actions.append(f"{'would copy' if dry_run else 'copied'} hook to {hook_dest()}")
 
-    block = f"{BLOCK_START}\n[ -f \"{HOOK_DEST}\" ] && source \"{HOOK_DEST}\"\n{BLOCK_END}\n"
+    block = f"{BLOCK_START}\n[ -f \"{hook_dest()}\" ] && source \"{hook_dest()}\"\n{BLOCK_END}\n"
     for rc in rc_files():
         try:
             with open(rc, "r", encoding="utf-8") as handle:
@@ -52,7 +58,7 @@ def install(dry_run: bool = False) -> List[str]:
         if not dry_run:
             with open(rc, "a", encoding="utf-8") as handle:
                 handle.write("\n" + block)
-        actions.append(f"added hook to {rc}")
+        actions.append(f"{'would add' if dry_run else 'added'} hook to {rc}")
     return actions
 
 
@@ -73,8 +79,9 @@ def uninstall(dry_run: bool = False) -> List[str]:
         if not dry_run:
             with open(rc, "w", encoding="utf-8") as handle:
                 handle.write(cleaned)
-        actions.append(f"removed hook from {rc}")
-    if os.path.exists(HOOK_DEST) and not dry_run:
-        os.unlink(HOOK_DEST)
-        actions.append(f"deleted {HOOK_DEST}")
+        actions.append(f"{'would remove' if dry_run else 'removed'} hook from {rc}")
+    if os.path.exists(hook_dest()):
+        if not dry_run:
+            os.unlink(hook_dest())
+        actions.append(f"{'would delete' if dry_run else 'deleted'} {hook_dest()}")
     return actions or ["no hook installed"]

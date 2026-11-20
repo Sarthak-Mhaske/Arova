@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify the tag matches the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test before publishing anything
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+          python -m pytest -q
+      - name: Tag and version must agree
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, sys
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          pyproject = pathlib.Path("pyproject.toml").read_text()
+          declared = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
+          source = pathlib.Path("deskmark/__init__.py").read_text()
+          dunder = re.search(r'__version__ = "([^"]+)"', source).group(1)
+          print(f"tag={tag} pyproject={declared} __init__={dunder}")
+          if not (tag == declared == dunder):
+              sys.exit("version mismatch: refusing to publish")
+          PY
+
+  build:
+    name: Build and publish
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write        # PyPI trusted publishing, no token stored
+      contents: write        # attach artifacts to the release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+      - name: Show what is in the wheel
+        run: python -m zipfile -l dist/*.whl
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

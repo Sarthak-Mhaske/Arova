@@ -1,0 +1,26 @@
+name: Feature request
+description: Something Deskmark should capture or restore
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two things get declined regardless of how good they are: new runtime
+        dependencies, and anything that captures pixels or keeps a daemon running.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What can you not restore today
+      description: Describe the desk, not the feature. "Zed with three files open comes back as a folder" beats "add Zed support".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would fix it
+      description: Optional. A provider, a restore step, a format field, a CLI flag.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Linux · Hyprland · kitty · Zed

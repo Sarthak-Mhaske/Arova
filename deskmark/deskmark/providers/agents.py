@@ -128,6 +128,11 @@ def capture_agents(limit: int = 6) -> List[AgentRef]:
         except OSError:
             cwd = ""
 
+        # A process whose working directory has been deleted cannot be resumed
+        # anywhere. /proc reports it as "/path (deleted)", which is not a path.
+        if cwd.endswith(" (deleted)"):
+            continue
+
         session_id = _session_from_cmdline(cmdline)
         hint = ""
         if kind == "claude":

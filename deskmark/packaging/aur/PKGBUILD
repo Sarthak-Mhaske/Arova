@@ -1,0 +1,29 @@
+# Maintainer: Sarthak Mhaske <mhaske@example.com>
+pkgname=deskmark
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="Resume points for your whole desk: save where your work is, put it back, hand it to an agent"
+arch=('any')
+url="https://github.com/<your-username>/deskmark"
+license=('Apache-2.0')
+depends=('python')
+makedepends=('python-build' 'python-installer' 'python-hatchling' 'python-wheel')
+checkdepends=('python-pytest')
+options=('!strip')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  python -m pytest -q
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+}

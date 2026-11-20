@@ -47,6 +47,11 @@ jobs:
           deskmark gc --days 0 > /dev/null
           echo "smoke ok"
 
+      - name: Demo machine (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/demo.sh
+
       - name: MCP protocol smoke test
         shell: bash
         run: |

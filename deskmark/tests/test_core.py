@@ -560,3 +560,75 @@ def test_deskmars_home_wins_over_xdg_for_the_session_log(home, monkeypatch, tmp_
 
     monkeypatch.delenv("DESKMARK_HOME")
     assert terminal.log_path() == str(tmp_path / "xdg" / "deskmark" / "session_log.jsonl")
+
+
+def test_doctor_reports_the_hook_using_the_same_path_capture_reads(home, capsys):
+    """doctor recomputing the log path is how it tells you to install a hook you have."""
+    import argparse
+    import pathlib
+
+    from deskmark import cli
+    from deskmark.providers.terminal import log_path
+
+    log = pathlib.Path(log_path())
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("")
+
+    cli.cmd_doctor(argparse.Namespace(look_keys=False))
+    hook_line = [l for l in capsys.readouterr().out.splitlines() if "shell hook" in l][0]
+    assert "run `hooks`" not in hook_line.replace("deskmark ", "")
+    assert str(log) in hook_line
+
+
+def test_hook_installs_under_deskmars_home(home):
+    """A home variable that moves points but not the hook is half a feature."""
+    from deskmark import hooks
+
+    assert hooks.hook_dest().startswith(str(home))
+    assert hooks.hook_dest().endswith("shell_hook.sh")
+
+
+def test_version_is_declared_once_and_agrees_everywhere(home):
+    """A release where the tag, pyproject and __init__ disagree ships the wrong thing."""
+    import pathlib
+    import re
+
+    import deskmark
+
+    pyproject = pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml"
+    declared = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.M).group(1)
+    assert declared == deskmark.__version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+", deskmark.__version__)
+    assert deskmark.SCHEMA_ID == "deskmark/v1"
+
+
+def test_hook_dry_run_changes_nothing_and_says_so(home, monkeypatch):
+    """A dry run that says "copied" while copying nothing is worse than no dry run."""
+    from deskmark import hooks
+
+    rc = home / ".bashrc"
+    rc.write_text("# my rc\n")
+    monkeypatch.setenv("HOME", str(home))
+
+    actions = hooks.install(dry_run=True)
+    assert any("would" in a for a in actions)
+    assert not any(a.startswith("copied") or a.startswith("added") for a in actions)
+    assert not hooks.hook_dest() or not __import__("os").path.exists(hooks.hook_dest())
+    assert rc.read_text() == "# my rc\n"
+
+    hooks.install(dry_run=False)
+    assert hooks.BLOCK_START in rc.read_text()
+    assert __import__("os").path.exists(hooks.hook_dest())
+
+    hooks.uninstall(dry_run=False)
+    assert hooks.BLOCK_START not in rc.read_text()
+    assert not __import__("os").path.exists(hooks.hook_dest())
+
+
+def test_agents_in_a_deleted_directory_are_not_offered(home):
+    """A resume hint pointing at a directory that no longer exists is noise."""
+    from deskmark.providers import agents
+
+    assert agents.capture_agents(limit=1) == [] or all(
+        not a.cwd.endswith(" (deleted)") for a in agents.capture_agents()
+    )

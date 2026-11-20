@@ -1,0 +1,37 @@
+name: Bug report
+description: Something broke, or a resume point is wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a privacy or security problem — data recorded that should not
+        be, a credential in a point, or anything executed by restore — please use
+        a [private advisory](https://github.com/<your-username>/deskmark/security/advisories/new)
+        instead of this form.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what you got.
+      placeholder: |
+        $ deskmark resume
+        expected: the plan
+        got: ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `deskmark doctor`
+      description: Paste it whole. It says what this machine can and cannot capture, which is usually the answer.
+      render: console
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version and platform
+      placeholder: deskmark 0.3.0 · Linux · Hyprland · Python 3.12
+    validations:
+      required: true

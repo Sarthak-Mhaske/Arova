@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: The format specification
+    url: https://github.com/<your-username>/deskmark/blob/main/docs/spec.md
+    about: Read this before proposing a new field in a resume point.
+  - name: Privacy and security
+    url: https://github.com/<your-username>/deskmark/security/policy
+    about: Report anything recorded that should not have been, privately.
